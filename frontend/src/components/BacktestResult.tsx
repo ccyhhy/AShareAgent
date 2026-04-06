@@ -1,42 +1,126 @@
-import React, { useState } from 'react';
-import { Card, Typography, Space, Row, Col, Statistic, Table, Image, message, Spin, Alert } from 'antd';
-import { 
-  TrophyOutlined, 
-  FallOutlined, 
-  RiseOutlined, 
+import React, { useMemo, useState } from 'react';
+import {
+  Alert,
+  Card,
+  Col,
+  Image,
+  Row,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+  message,
+} from 'antd';
+import {
+  AreaChartOutlined,
   DollarCircleOutlined,
+  FallOutlined,
   PictureOutlined,
-  BarChartOutlined
+  RiseOutlined,
+  SafetyCertificateOutlined,
+  TrophyOutlined,
 } from '@ant-design/icons';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface BacktestResultProps {
   result: any;
 }
 
 const BacktestResult: React.FC<BacktestResultProps> = ({ result }) => {
-  const [imageLoading, setImageLoading] = useState(true);
   const [imageError, setImageError] = useState(false);
+  const [imageLoading, setImageLoading] = useState(true);
 
-  if (!result || !result.result) {
+  const payload = result?.result ?? result;
+
+  const metrics = useMemo(() => {
+    if (!payload) {
+      return [];
+    }
+
+    return [
+      {
+        key: 'total_return',
+        label: '总收益率',
+        value: payload.performance_metrics?.total_return,
+        formatter: 'percent',
+        icon: <RiseOutlined />,
+      },
+      {
+        key: 'annualized_return',
+        label: '年化收益率',
+        value: payload.performance_metrics?.annualized_return,
+        formatter: 'percent',
+        icon: <TrophyOutlined />,
+      },
+      {
+        key: 'sharpe_ratio',
+        label: '夏普比率',
+        value: payload.performance_metrics?.sharpe_ratio,
+        formatter: 'number',
+        icon: <DollarCircleOutlined />,
+      },
+      {
+        key: 'max_drawdown',
+        label: '最大回撤',
+        value: payload.performance_metrics?.max_drawdown,
+        formatter: 'percent',
+        icon: <FallOutlined />,
+      },
+    ];
+  }, [payload]);
+
+  const riskMetrics = useMemo(
+    () => [
+      { key: 'var_95', label: 'VaR (95%)', value: payload?.risk_metrics?.var_95, formatter: 'percent' },
+      { key: 'expected_shortfall', label: '预期损失', value: payload?.risk_metrics?.expected_shortfall, formatter: 'percent' },
+      { key: 'beta', label: 'Beta', value: payload?.risk_metrics?.beta, formatter: 'number' },
+      { key: 'alpha', label: 'Alpha', value: payload?.risk_metrics?.alpha, formatter: 'number' },
+    ],
+    [payload],
+  );
+
+  if (!payload) {
     return (
-      <Alert 
-        message="无回测结果数据" 
-        description="请先运行回测任务"
-        type="warning" 
-        showIcon 
+      <Alert
+        message="暂无回测结果"
+        description="请先运行一个回测任务，完成后这里会展示策略表现、风险指标和交易明细。"
+        type="warning"
+        showIcon
       />
     );
   }
 
-  const data = result.result;
-  const performanceMetrics = data.performance_metrics || {};
-  const riskMetrics = data.risk_metrics || {};
-  const trades = data.trades || [];
-  const plotUrl = data.plot_url;
+  const trades = payload.trades || [];
+  const plotUrl = payload.plot_url || payload.plot_path;
+  const plotSrc = plotUrl
+    ? plotUrl.startsWith('http')
+      ? plotUrl
+      : `http://127.0.0.1:8000${plotUrl}`
+    : null;
 
-  // 交易记录表格列定义
+  const formatValue = (value: number | null | undefined, formatter: 'percent' | 'number') => {
+    if (value == null) {
+      return '--';
+    }
+
+    if (formatter === 'percent') {
+      return `${(value * 100).toFixed(2)}%`;
+    }
+    return value.toFixed(2);
+  };
+
+  const metricColor = (value: number | null | undefined, inverse = false) => {
+    if (value == null) {
+      return undefined;
+    }
+    if (inverse) {
+      return value <= 0 ? '#0f9a64' : '#c23846';
+    }
+    return value >= 0 ? '#c23846' : '#0f9a64';
+  };
+
   const tradeColumns = [
     {
       title: '日期',
@@ -47,11 +131,14 @@ const BacktestResult: React.FC<BacktestResultProps> = ({ result }) => {
       title: '动作',
       dataIndex: 'action',
       key: 'action',
-      render: (action: string) => (
-        <Text type={action === 'buy' ? 'danger' : action === 'sell' ? 'success' : undefined}>
-          {action === 'buy' ? '买入' : action === 'sell' ? '卖出' : '持有'}
-        </Text>
-      ),
+      render: (action: string) => {
+        const normalized = String(action || '').toLowerCase();
+        const tagColor =
+          normalized === 'buy' ? 'error' : normalized === 'sell' ? 'success' : 'default';
+        const label =
+          normalized === 'buy' ? '买入' : normalized === 'sell' ? '卖出' : '持有';
+        return <Tag color={tagColor}>{label}</Tag>;
+      },
     },
     {
       title: '数量',
@@ -62,158 +149,136 @@ const BacktestResult: React.FC<BacktestResultProps> = ({ result }) => {
       title: '价格',
       dataIndex: 'price',
       key: 'price',
-      render: (price: number) => `¥${price?.toFixed(2) || 'N/A'}`,
+      render: (price: number) => `¥${price?.toFixed(2) || '--'}`,
     },
     {
       title: '总金额',
       dataIndex: 'total_amount',
       key: 'total_amount',
-      render: (amount: number) => `¥${amount?.toFixed(2) || 'N/A'}`,
+      render: (value: number) => `¥${value?.toFixed(2) || '--'}`,
     },
   ];
 
-  const formatPercentage = (value: number | null) => {
-    if (value === null || value === undefined) return 'N/A';
-    return `${(value * 100).toFixed(2)}%`;
-  };
-
-  const formatNumber = (value: number | null, decimals: number = 2) => {
-    if (value === null || value === undefined) return 'N/A';
-    return value.toFixed(decimals);
-  };
-
   return (
-    <div style={{ padding: '24px' }}>
-      <Title level={2} style={{ marginBottom: '24px' }}>
-        <BarChartOutlined /> 回测结果 - {result.ticker}
-      </Title>
-      
-      <Text type="secondary" style={{ marginBottom: '24px', display: 'block' }}>
-        回测周期: {result.start_date} 至 {result.end_date}
-      </Text>
+    <div className="backtest-page backtest-result-page">
+      <Card className="feature-card backtest-result-hero-card mb-4">
+        <div className="section-hero">
+          <div>
+            <span className="section-kicker">Backtest Review</span>
+            <h3 className="section-title">策略结果复盘</h3>
+            <p className="section-description">
+              这里集中展示收益表现、风险指标、图形结果和交易明细，适合直接作为实验章节或答辩展示页截图来源。
+            </p>
+          </div>
+          <div className="backtest-highlight">
+            <span className="backtest-highlight-label">回测标的</span>
+            <strong>{result.ticker || payload.ticker || '--'}</strong>
+            <Text type="secondary">
+              {result.start_date || payload.start_date || '--'} 至 {result.end_date || payload.end_date || '--'}
+            </Text>
+          </div>
+        </div>
+      </Card>
 
-      {/* 回测图表 */}
-      {plotUrl && (
-        <Card 
+      {plotSrc && (
+        <Card
+          className="feature-card mb-4"
           title={
             <Space>
               <PictureOutlined />
-              回测图表
+              <span>回测图表</span>
             </Space>
           }
-          style={{ marginBottom: '24px' }}
         >
-          <div style={{ textAlign: 'center' }}>
-            {imageLoading && <Spin size="large" />}
+          <div className="backtest-image-shell">
             <Image
-              src={`http://localhost:8000${plotUrl}`}
+              src={plotSrc}
               alt="回测图表"
-              style={{ 
-                maxWidth: '100%',
-                display: imageLoading ? 'none' : 'block'
-              }}
+              style={{ maxWidth: '100%', display: imageLoading ? 'none' : 'block' }}
               onLoad={() => setImageLoading(false)}
               onError={() => {
                 setImageLoading(false);
                 setImageError(true);
-                message.error('图表加载失败');
+                message.error('回测图表加载失败');
               }}
-              preview={{
-                mask: '点击查看大图'
-              }}
+              preview={{ mask: '点击查看大图' }}
             />
+            {imageLoading && <div className="backtest-image-placeholder">图表加载中...</div>}
             {imageError && (
-              <Alert 
-                message="图表加载失败" 
-                description="请检查图表文件是否存在"
-                type="error" 
-                showIcon 
-                style={{ margin: '20px 0' }}
+              <Alert
+                message="图表加载失败"
+                description="请检查后端静态资源路径或重新生成该次回测图表。"
+                type="error"
+                showIcon
               />
             )}
           </div>
         </Card>
       )}
 
-      {/* 性能指标 */}
-      <Card title="性能指标" style={{ marginBottom: '24px' }}>
+      <div className="dashboard-overview-grid mb-4">
+        {metrics.map((item) => (
+          <div className="overview-stat-card" key={item.key}>
+            <span className="overview-stat-label">{item.label}</span>
+            <strong
+              className="overview-stat-value"
+              style={{
+                color:
+                  item.key === 'max_drawdown'
+                    ? metricColor(item.value, true)
+                    : metricColor(item.value),
+              }}
+            >
+              {formatValue(item.value, item.formatter as 'percent' | 'number')}
+            </strong>
+            <span className="overview-stat-foot">
+              <Space size={6}>
+                {item.icon}
+                <span>核心回测指标</span>
+              </Space>
+            </span>
+          </div>
+        ))}
+      </div>
+
+      <Card
+        className="feature-card mb-4"
+        title={
+          <Space>
+            <SafetyCertificateOutlined />
+            <span>风险指标</span>
+          </Space>
+        }
+      >
         <Row gutter={[16, 16]}>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="总收益率"
-              value={formatPercentage(performanceMetrics.total_return)}
-              prefix={<RiseOutlined />}
-              valueStyle={{ color: (performanceMetrics.total_return || 0) >= 0 ? '#cf1322' : '#3f8600' }}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="年化收益率"
-              value={formatPercentage(performanceMetrics.annualized_return)}
-              prefix={<TrophyOutlined />}
-              valueStyle={{ color: (performanceMetrics.annualized_return || 0) >= 0 ? '#cf1322' : '#3f8600' }}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="夏普比率"
-              value={formatNumber(performanceMetrics.sharpe_ratio)}
-              prefix={<DollarCircleOutlined />}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="最大回撤"
-              value={formatPercentage(performanceMetrics.max_drawdown)}
-              prefix={<FallOutlined />}
-              valueStyle={{ color: '#3f8600' }}
-            />
-          </Col>
+          {riskMetrics.map((item) => (
+            <Col xs={24} sm={12} md={6} key={item.key}>
+              <Card className="inner-panel-card backtest-mini-card" bordered={false}>
+                <Statistic
+                  title={item.label}
+                  value={formatValue(item.value, item.formatter as 'percent' | 'number')}
+                  prefix={<AreaChartOutlined />}
+                />
+              </Card>
+            </Col>
+          ))}
         </Row>
       </Card>
 
-      {/* 风险指标 */}
-      <Card title="风险指标" style={{ marginBottom: '24px' }}>
-        <Row gutter={[16, 16]}>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="VaR (95%)"
-              value={formatPercentage(riskMetrics.var_95)}
-              suffix=""
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="预期亏损"
-              value={formatPercentage(riskMetrics.expected_shortfall)}
-              suffix=""
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="Beta系数"
-              value={formatNumber(riskMetrics.beta)}
-              suffix=""
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
-            <Statistic
-              title="Alpha系数"
-              value={formatNumber(riskMetrics.alpha)}
-              suffix=""
-            />
-          </Col>
-        </Row>
-      </Card>
-
-      {/* 交易记录 */}
       {trades.length > 0 && (
-        <Card title="交易记录">
+        <Card
+          className="feature-card"
+          title={
+            <Space>
+              <DollarCircleOutlined />
+              <span>交易明细</span>
+            </Space>
+          }
+        >
           <Table
             dataSource={trades.map((trade: any, index: number) => ({ ...trade, key: index }))}
             columns={tradeColumns}
             pagination={{ pageSize: 10 }}
-            size="middle"
             scroll={{ x: true }}
           />
         </Card>

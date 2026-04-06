@@ -17,7 +17,7 @@ import threading  # Used for server stop event
 import time  # Used for server stop event
 import inspect  # Used in log_llm_interaction (decorator mode)
 from typing import Dict, List, Any, Optional, Callable, TypeVar  # Keep needed types
-from datetime import datetime, UTC  # Keep needed datetime objects
+from datetime import datetime, timezone  # Keep needed datetime objects
 # from contextlib import contextmanager # Unused
 # from concurrent.futures import ThreadPoolExecutor, Future # Unused
 import uvicorn  # Used in start_api_server
@@ -113,7 +113,7 @@ def log_llm_interaction(state):
             formatted_request = format_llm_request(request_data)
             formatted_response = format_llm_response(response_data)
 
-            timestamp = datetime.now(UTC)
+            timestamp = datetime.now(timezone.utc)
 
             # 获取当前运行ID
             run_id = api_state.current_run_id
@@ -190,7 +190,7 @@ def log_llm_interaction(state):
                 run_id = api_state.current_run_id
 
             if agent_name:
-                timestamp = datetime.now(UTC)
+                timestamp = datetime.now(timezone.utc)
 
                 # 提取messages参数
                 messages = None
@@ -277,7 +277,7 @@ def agent_endpoint(agent_name: str, description: str = ""):
             # 确保run_id在元数据中，这对日志记录至关重要
             run_id = state.get("metadata", {}).get("run_id")
             # 记录输入状态
-            timestamp_start = datetime.now(UTC)
+            timestamp_start = datetime.now(timezone.utc)
             serialized_input = serialize_agent_state(state)
             api_state.update_agent_data(
                 agent_name, "input_state", serialized_input)
@@ -313,7 +313,7 @@ def agent_endpoint(agent_name: str, description: str = ""):
                     result["metadata"][agent_reasoning_key] = state["metadata"]["agent_reasoning"]
                 # --------------------------
 
-                timestamp_end = datetime.now(UTC)
+                timestamp_end = datetime.now(timezone.utc)
 
                 # 恢复标准输出/错误
                 sys.stdout = old_stdout
@@ -406,7 +406,7 @@ def agent_endpoint(agent_name: str, description: str = ""):
                 return result
             except Exception as e:
                 # Record end time even on error
-                timestamp_end = datetime.now(UTC)
+                timestamp_end = datetime.now(timezone.utc)
                 error = str(e)
                 # 恢复标准输出/错误
                 sys.stdout = old_stdout

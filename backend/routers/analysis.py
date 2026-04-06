@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 import uuid
 import logging
 import json
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Dict, List
 
 from backend.models.api_models import (
@@ -171,7 +171,7 @@ async def start_stock_analysis(
             ticker=request.ticker,
             status="running",
             message="分析任务已启动",
-            submitted_at=datetime.now(UTC)
+                submitted_at=datetime.now(timezone.utc)
         )
         
     except Exception as e:

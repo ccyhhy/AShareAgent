@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 import pandas as pd
 import akshare as ak
@@ -11,6 +12,7 @@ from requests.packages.urllib3.util.retry import Retry
 import time
 import warnings
 from functools import wraps
+from src.tools.local_csv_provider import LocalCSVProvider
 from src.utils.logging_config import setup_logger
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as ConcurrentTimeoutError
 
@@ -44,6 +46,8 @@ DATA_SOURCES = {
     'akshare': {'priority': 2, 'timeout': 60, 'retries': 2},
     'yfinance': {'priority': 3, 'timeout': 30, 'retries': 2}
 }
+
+DEFAULT_LOCAL_CSV_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
 # 重试装饰器
 def retry_on_failure(max_retries=3, delay=1):
@@ -149,6 +153,48 @@ def get_stock_code_for_yfinance(symbol: str) -> str:
         return f"{symbol}.SZ"  # 深交所
     else:
         return f"{symbol}.SS"  # 上交所
+
+
+def _get_local_csv_provider(csv_dir: Union[str, Path, None] = None) -> LocalCSVProvider:
+    base_dir = Path(csv_dir) if csv_dir else DEFAULT_LOCAL_CSV_DIR
+    return LocalCSVProvider(base_dir=base_dir)
+
+
+def _normalize_local_price_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+
+    normalized = df.copy()
+
+    if "high" not in normalized.columns:
+        normalized["high"] = normalized["close"]
+    if "low" not in normalized.columns:
+        normalized["low"] = normalized["close"]
+    if "volume" not in normalized.columns:
+        normalized["volume"] = 0.0
+
+    for column in ["open", "high", "low", "close", "volume"]:
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+
+    normalized = normalized.dropna(subset=["date", "open", "close"]).reset_index(drop=True)
+    if len(normalized) < 20:
+        normalized = normalized.sort_values("date").reset_index(drop=True)
+        normalized["momentum_1m"] = 0.0
+        normalized["momentum_3m"] = 0.0
+        normalized["momentum_6m"] = 0.0
+        normalized["volume_ma20"] = normalized["volume"].astype(float)
+        normalized["volume_momentum"] = 1.0
+        normalized["historical_volatility"] = 0.0
+        normalized["volatility_regime"] = 0.5
+        normalized["volatility_z_score"] = 0.0
+        normalized["atr"] = (normalized["high"] - normalized["low"]).fillna(0.0)
+        normalized["atr_ratio"] = 0.0
+        normalized["hurst_exponent"] = 0.5
+        normalized["skewness"] = 0.0
+        normalized["kurtosis"] = 0.0
+        return normalized
+
+    return _add_technical_indicators(normalized)
 
 
 @retry_on_failure(max_retries=2, delay=1)
@@ -1035,7 +1081,15 @@ def _get_market_data_yfinance(symbol: str) -> Dict[str, Any]:
         raise Exception(f"Error with yfinance market data: {e}")
 
 
-def get_price_history(symbol: str, start_date: str = None, end_date: str = None, adjust: str = "qfq") -> pd.DataFrame:
+def get_price_history(
+    symbol: str,
+    start_date: str = None,
+    end_date: str = None,
+    adjust: str = "qfq",
+    provider_preference: str | None = None,
+    local_only: bool = False,
+    csv_dir: Union[str, Path, None] = None,
+) -> pd.DataFrame:
     """获取历史价格数据
 
     Args:
@@ -1075,6 +1129,16 @@ def get_price_history(symbol: str, start_date: str = None, end_date: str = None,
         - kurtosis: 峰度
     """
     try:
+        if provider_preference == "local_csv" or local_only:
+            local_df = _get_local_csv_provider(csv_dir).get_price_history(symbol, start_date, end_date)
+            if not local_df.empty:
+                logger.info(f"Using local CSV price history for {symbol}")
+                return _normalize_local_price_df(local_df)
+
+            if local_only:
+                logger.warning(f"Local-only price history requested but no CSV data found for {symbol}")
+                return pd.DataFrame()
+
         # 获取当前日期和昨天的日期
         current_date = datetime.now()
         yesterday = current_date - timedelta(days=1)
@@ -1386,7 +1450,10 @@ def prices_to_df(prices):
 def get_price_data(
     ticker: str,
     start_date: str,
-    end_date: str
+    end_date: str,
+    provider_preference: str | None = None,
+    local_only: bool = False,
+    csv_dir: Union[str, Path, None] = None,
 ) -> pd.DataFrame:
     """获取股票价格数据，使用多数据源策略
 
@@ -1398,7 +1465,14 @@ def get_price_data(
     Returns:
         包含价格数据的DataFrame
     """
-    return get_price_history(ticker, start_date, end_date)
+    return get_price_history(
+        ticker,
+        start_date,
+        end_date,
+        provider_preference=provider_preference,
+        local_only=local_only,
+        csv_dir=csv_dir,
+    )
 
 
 def _handle_nan_values(df: pd.DataFrame) -> pd.DataFrame:

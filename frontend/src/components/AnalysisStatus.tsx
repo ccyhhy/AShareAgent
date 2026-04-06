@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Progress, Alert, Button, Spin, Tag, Collapse, Tabs } from 'antd';
-import { ReloadOutlined, EyeOutlined, FileTextOutlined } from '@ant-design/icons';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Card, Collapse, Progress, Spin, Tabs } from 'antd';
+import { EyeOutlined, FileTextOutlined, ReloadOutlined } from '@ant-design/icons';
 import { ApiService, type AnalysisStatus as Status } from '../services/api';
 import ReportView from './ReportView';
 
@@ -8,6 +8,98 @@ interface AnalysisStatusProps {
   runId: string;
   onComplete?: (result: any) => void;
 }
+
+interface AgentInsight {
+  agent_name: string;
+  agent_type?: string;
+  signal?: string;
+  confidence?: number | string;
+  summary?: string;
+  execution_time_ms?: number;
+  token_usage?: number | string | Record<string, any>;
+}
+
+const normalizeConfidence = (value: unknown): number | null => {
+  if (typeof value === 'number') {
+    return value <= 1 ? Math.round(value * 100) : Math.round(value);
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value.replace('%', '').trim());
+    if (!Number.isNaN(parsed)) {
+      return parsed <= 1 ? Math.round(parsed * 100) : Math.round(parsed);
+    }
+  }
+
+  return null;
+};
+
+const normalizeSignal = (value: unknown): string => {
+  if (!value) {
+    return 'neutral';
+  }
+
+  const text = String(value).toLowerCase();
+  if (text.includes('buy') || text.includes('bull')) {
+    return 'bullish';
+  }
+  if (text.includes('sell') || text.includes('bear')) {
+    return 'bearish';
+  }
+  if (text.includes('hold')) {
+    return 'hold';
+  }
+  return 'neutral';
+};
+
+const formatTokenUsage = (value: unknown): string => {
+  if (value == null) {
+    return '-';
+  }
+  if (typeof value === 'number' || typeof value === 'string') {
+    return String(value);
+  }
+  if (typeof value === 'object' && 'total' in (value as Record<string, any>)) {
+    return String((value as Record<string, any>).total);
+  }
+  return '-';
+};
+
+const extractAgentInsights = (result: any): AgentInsight[] => {
+  if (!result || typeof result !== 'object') {
+    return [];
+  }
+
+  if (result.agent_outputs && typeof result.agent_outputs === 'object') {
+    return Object.entries(result.agent_outputs).map(([agentName, payload]) => {
+      const data = (payload || {}) as Record<string, any>;
+      return {
+        agent_name: data.agent_name || agentName,
+        agent_type: data.agent_type,
+        signal: data.signal,
+        confidence: data.confidence,
+        summary: data.summary || data.reasoning,
+        execution_time_ms: data.execution_time_ms,
+        token_usage: data.token_usage,
+      };
+    });
+  }
+
+  const signalList = result.agent_signals || result.analyst_signals;
+  if (Array.isArray(signalList)) {
+    return signalList.map((item: Record<string, any>, index: number) => ({
+      agent_name: item.agent_name || item.name || `agent_${index + 1}`,
+      agent_type: item.agent_type,
+      signal: item.signal,
+      confidence: item.confidence,
+      summary: item.reasoning || item.summary,
+      execution_time_ms: item.execution_time_ms,
+      token_usage: item.token_usage,
+    }));
+  }
+
+  return [];
+};
 
 const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) => {
   const [status, setStatus] = useState<Status | null>(null);
@@ -20,14 +112,11 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
       const response = await ApiService.getAnalysisStatus(runId);
       if (response.success && response.data) {
         setStatus(response.data);
-        
-        // 如果分析完成，获取结果
+
         if (response.data.status === 'completed') {
           const resultResponse = await ApiService.getAnalysisResult(runId);
           if (resultResponse.success && resultResponse.data) {
-            // Extract the actual result from the nested structure
             const actualResult = resultResponse.data.result || resultResponse.data;
-            // Add ticker and task info from status response if not present in result
             if (!actualResult.ticker && (response.data as any).ticker) {
               actualResult.ticker = (response.data as any).ticker;
             }
@@ -48,63 +137,53 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
 
   useEffect(() => {
     fetchStatus();
-    
-    // 如果任务还在运行，定期轮询状态
+
     let interval: number;
     if (status?.status === 'running') {
       interval = setInterval(fetchStatus, 3000);
     }
-    
+
     return () => {
-      if (interval) clearInterval(interval);
+      if (interval) {
+        clearInterval(interval);
+      }
     };
   }, [runId, status?.status]);
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'running': return 'processing';
-      case 'completed': return 'success';
-      case 'failed': return 'error';
-      default: return 'default';
+  const progress = useMemo(() => {
+    if (!status) {
+      return 0;
     }
-  };
 
-  const getProgress = () => {
-    if (!status) return 0;
-    
-    // 如果有进度信息，尝试从中解析进度
     if (status.progress && typeof status.progress === 'string') {
-      // 尝试从进度文本中提取百分比
       const progressMatch = status.progress.match(/(\d+)%/);
       if (progressMatch) {
-        return parseInt(progressMatch[1]);
+        return Number.parseInt(progressMatch[1], 10);
       }
-      
-      // 根据关键词估算进度
-      const progress = status.progress.toLowerCase();
-      if (progress.includes('开始') || progress.includes('初始化')) return 10;
-      if (progress.includes('数据收集') || progress.includes('market_data')) return 20;
-      if (progress.includes('技术分析') || progress.includes('technical')) return 30;
-      if (progress.includes('基本面') || progress.includes('fundamental')) return 40;
-      if (progress.includes('情感分析') || progress.includes('sentiment')) return 50;
-      if (progress.includes('估值') || progress.includes('valuation')) return 60;
-      if (progress.includes('风险') || progress.includes('risk')) return 70;
-      if (progress.includes('宏观') || progress.includes('macro')) return 80;
-      if (progress.includes('投资组合') || progress.includes('portfolio')) return 90;
-      if (progress.includes('完成') || progress.includes('结束')) return 100;
     }
-    
-    switch (status.status) {
-      case 'running': return 50;
-      case 'completed': return 100;
-      case 'failed': return 0;
-      default: return 0;
+
+    if (status.status === 'completed') {
+      return 100;
     }
-  };
+    if (status.status === 'running') {
+      return 60;
+    }
+    return 0;
+  }, [status]);
+
+  const insights = useMemo(() => extractAgentInsights(result), [result]);
+  const decision = result?.decision || result?.action || result?.signal || 'HOLD';
+  const ticker = result?.ticker || status?.run_id?.slice(0, 6) || '--';
+  const summary =
+    result?.reasoning ||
+    result?.summary ||
+    result?.decision_reasoning ||
+    '系统正在汇总多智能体分析结果。';
+  const confidence = normalizeConfidence(result?.confidence);
 
   return (
     <Card
-      title={`分析任务 - ${runId}`}
+      title={`分析任务 #${runId.slice(0, 8)}`}
       extra={
         <Button
           icon={<ReloadOutlined />}
@@ -116,20 +195,96 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
           刷新
         </Button>
       }
-      className="feature-card mb-4"
+      className="feature-card analysis-status-card mb-4"
     >
-      {status && (
+      {status ? (
         <>
-          <div className="mb-4">
-            <Tag color={getStatusColor(status.status)} className="mb-2">
-              {status.status.toUpperCase()}
-            </Tag>
+          <div className="analysis-progress-rail">
+            <div className="analysis-status-row">
+              <span className="analysis-status-label">
+                {status.status === 'completed'
+                  ? 'COMPLETED'
+                  : status.status === 'running'
+                    ? 'RUNNING'
+                    : 'FAILED'}
+              </span>
+              {status.progress && <span>{status.progress}</span>}
+            </div>
             <Progress
-              percent={getProgress()}
+              percent={progress}
+              showInfo={false}
               status={status.status === 'failed' ? 'exception' : 'normal'}
-              strokeColor={status.status === 'completed' ? '#52c41a' : undefined}
             />
           </div>
+
+          <div className="analysis-hero">
+            <div className="decision-hero-card">
+              <span className="decision-hero-kicker">Joint Decision</span>
+              <div className="decision-hero-title">{String(decision).toUpperCase()}</div>
+              <p className="decision-hero-summary">{summary}</p>
+            </div>
+
+            <div className="analysis-metric-grid">
+              <div className="analysis-metric-card">
+                <span className="analysis-metric-label">Ticker</span>
+                <span className="analysis-metric-value">{ticker}</span>
+              </div>
+              <div className="analysis-metric-card">
+                <span className="analysis-metric-label">Confidence</span>
+                <span className="analysis-metric-value">
+                  {confidence != null ? `${confidence}%` : '--'}
+                </span>
+              </div>
+              <div className="analysis-metric-card">
+                <span className="analysis-metric-label">Agent Nodes</span>
+                <span className="analysis-metric-value">{insights.length || 4}</span>
+              </div>
+              <div className="analysis-metric-card">
+                <span className="analysis-metric-label">Run ID</span>
+                <span className="analysis-metric-value">#{runId.slice(0, 8)}</span>
+              </div>
+            </div>
+          </div>
+
+          {insights.length > 0 && (
+            <div className="analysis-section">
+              <div className="analysis-section-head">
+                <h3>Agent Intelligence Nodes</h3>
+              </div>
+              <div className="agent-grid">
+                {insights.map((item) => {
+                  const signal = normalizeSignal(item.signal);
+                  const confidenceValue = normalizeConfidence(item.confidence);
+                  return (
+                    <div className="agent-node-card" key={`${item.agent_name}-${item.agent_type || 'agent'}`}>
+                      <div className="agent-node-head">
+                        <div>
+                          <h4 className="agent-node-name">{item.agent_name}</h4>
+                          <span className="agent-node-type">
+                            {item.agent_type || 'analysis'}
+                          </span>
+                        </div>
+                        <span className={`agent-signal-badge agent-signal-${signal}`}>
+                          {item.signal || signal}
+                        </span>
+                      </div>
+                      <p className="agent-node-summary">
+                        {item.summary || '该 Agent 已完成当前轮分析，等待联合决策汇总。'}
+                      </p>
+                      <div className="agent-node-meta">
+                        <span>{confidenceValue != null ? `置信度 ${confidenceValue}%` : '置信度 --'}</span>
+                        <span>
+                          {item.execution_time_ms
+                            ? `${item.execution_time_ms}ms`
+                            : `Tokens ${formatTokenUsage(item.token_usage)}`}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {status.progress && (
             <Alert
@@ -167,17 +322,11 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
                           key: 'json',
                           label: (
                             <span>
-                              <EyeOutlined /> 原始数据 (JSON)
+                              <EyeOutlined /> 原始数据 JSON
                             </span>
                           ),
                           children: (
-                            <pre style={{ 
-                              background: '#f5f5f5', 
-                              padding: '16px', 
-                              borderRadius: '4px',
-                              maxHeight: '400px',
-                              overflow: 'auto'
-                            }}>
+                            <pre className="json-viewer">
                               {JSON.stringify(result, null, 2)}
                             </pre>
                           ),
@@ -193,18 +342,16 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
           {status.status === 'failed' && (
             <Alert
               message="分析失败"
-              description="任务执行过程中发生错误，请检查日志或重新启动分析。"
+              description="任务执行过程中发生错误，请检查后端日志或重新发起分析。"
               type="error"
               showIcon
             />
           )}
         </>
-      )}
-
-      {!status && (
-        <div style={{ textAlign: 'center', padding: '20px' }}>
+      ) : (
+        <div className="loading-container">
           <Spin size="large" />
-          <p>正在获取任务状态...</p>
+          <div className="loading-text">正在获取分析任务状态...</div>
         </div>
       )}
     </Card>

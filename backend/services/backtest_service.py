@@ -8,7 +8,7 @@ import uuid
 import json
 import logging
 import os
-from datetime import datetime, UTC
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from concurrent.futures import Future
 
@@ -221,7 +221,7 @@ class BacktestService:
                 end_date=request.end_date,
                 status="running",
                 message="回测任务已启动",
-                submitted_at=datetime.now(UTC)
+                submitted_at=datetime.now(timezone.utc)
             )
             
             return response

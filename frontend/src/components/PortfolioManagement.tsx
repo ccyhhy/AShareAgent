@@ -449,24 +449,9 @@ const PortfolioManagement: React.FC = () => {
   }
 
   return (
-    <div style={{ 
-      padding: '24px',
-      background: '#f5f5f5',
-      minHeight: 'calc(100vh - 64px)'
-    }}>
+    <div className="portfolio-management-page">
       {/* 页面标题 */}
-      <div style={{ 
-        marginBottom: '24px',
-        padding: '20px 0',
-        borderBottom: '1px solid #e8e8e8',
-        background: '#ffffff',
-        borderRadius: '8px 8px 0 0',
-        marginLeft: '-24px',
-        marginRight: '-24px',
-        marginTop: '-24px',
-        paddingLeft: '24px',
-        paddingRight: '24px'
-      }}>
+      <div className="portfolio-page-hero">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <div style={{
             width: '32px',
@@ -515,6 +500,7 @@ const PortfolioManagement: React.FC = () => {
         {/* 左侧组合列表 */}
         <Col span={6}>
           <Card
+            className="portfolio-sidebar-card"
             style={{
               borderRadius: '12px',
               border: '1px solid #e8e8e8',
@@ -577,6 +563,7 @@ const PortfolioManagement: React.FC = () => {
                   
                   return (
                     <Card
+                      className={`portfolio-list-card ${isSelected ? 'is-selected' : ''}`}
                       key={portfolio.id}
                       hoverable
                       onClick={() => setSelectedPortfolio(portfolio)}
@@ -666,8 +653,9 @@ const PortfolioManagement: React.FC = () => {
           {selectedPortfolio ? (
             <>
               {/* 组合概览卡片 */}
-              <Card
-                style={{ 
+                  <Card
+                    className="portfolio-summary-card"
+                    style={{ 
                   marginBottom: 24,
                   background: 'linear-gradient(135deg, #f6f9fc 0%, #ffffff 100%)',
                   border: '1px solid #e8f4f8'
@@ -732,6 +720,7 @@ const PortfolioManagement: React.FC = () => {
                 <Row gutter={[24, 16]} style={{ marginTop: '8px' }}>
                   <Col span={6}>
                     <Card
+                      className="portfolio-stat-card portfolio-stat-card-current"
                       size="small"
                       style={{ 
                         textAlign: 'center',
@@ -758,6 +747,7 @@ const PortfolioManagement: React.FC = () => {
                   </Col>
                   <Col span={6}>
                     <Card
+                      className="portfolio-stat-card portfolio-stat-card-initial"
                       size="small"
                       style={{ 
                         textAlign: 'center',
@@ -784,6 +774,7 @@ const PortfolioManagement: React.FC = () => {
                   </Col>
                   <Col span={6}>
                     <Card
+                      className="portfolio-stat-card portfolio-stat-card-cash"
                       size="small"
                       style={{ 
                         textAlign: 'center',
@@ -810,6 +801,7 @@ const PortfolioManagement: React.FC = () => {
                   </Col>
                   <Col span={6}>
                     <Card
+                      className="portfolio-stat-card portfolio-stat-card-return"
                       size="small"
                       style={{ 
                         textAlign: 'center',
@@ -841,7 +833,7 @@ const PortfolioManagement: React.FC = () => {
               </Card>
 
               {/* 详情标签页 */}
-              <Card>
+              <Card className="portfolio-empty-card">
                 <Tabs
                   activeKey={activeTab}
                   onChange={(key) => setActiveTab(key as any)}

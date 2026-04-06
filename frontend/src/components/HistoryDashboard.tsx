@@ -494,8 +494,9 @@ const HistoryDashboard: React.FC = () => {
   ];
 
   return (
-    <>
+    <div className="history-dashboard-page">
       <Card
+        className="feature-card history-dashboard-card"
         title={
           <Space>
             <DatabaseOutlined />
@@ -513,7 +514,8 @@ const HistoryDashboard: React.FC = () => {
           </Button>
         }
       >
-        <Tabs 
+        <Tabs
+          className="history-dashboard-tabs"
           activeKey={activeTab} 
           onChange={setActiveTab}
           items={[
@@ -902,7 +904,7 @@ const HistoryDashboard: React.FC = () => {
           </div>
         )}
       </Modal>
-    </>
+    </div>
   );
 };
 

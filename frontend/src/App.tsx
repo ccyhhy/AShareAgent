@@ -1,38 +1,86 @@
-import { useState, useEffect } from 'react';
-import { Layout, Menu, Typography, Space, Button, Avatar, Dropdown } from 'antd';
+import { useEffect, useState } from 'react';
+import { Avatar, Button, Dropdown, Input, Layout, Menu, Space, Typography } from 'antd';
 import {
-  DashboardOutlined,
-  RobotOutlined,
-  HistoryOutlined,
   BarChartOutlined,
+  BellOutlined,
+  BookOutlined,
+  DashboardOutlined,
   ExperimentOutlined,
-  UserOutlined,
-  LogoutOutlined,
   FundOutlined,
+  HistoryOutlined,
+  LineChartOutlined,
+  LogoutOutlined,
   MonitorOutlined,
+  QuestionCircleOutlined,
+  ReloadOutlined,
+  RobotOutlined,
+  SearchOutlined,
   SettingOutlined,
-  LineChartOutlined
+  UserOutlined,
 } from '@ant-design/icons';
 import AnalysisForm from './components/AnalysisForm';
 import AnalysisStatus from './components/AnalysisStatus';
 import AgentDashboard from './components/AgentDashboard';
+import BacktestForm from './components/BacktestForm';
+import BacktestResult from './components/BacktestResult';
+import BacktestStatus from './components/BacktestStatus';
 import HistoryDashboard from './components/HistoryDashboard';
 import LoginForm from './components/LoginForm';
-import BacktestForm from './components/BacktestForm';
-import BacktestStatus from './components/BacktestStatus';
-import BacktestResult from './components/BacktestResult';
-import UserProfile from './components/UserProfile';
+import PersonalStats from './components/PersonalStats';
 import PortfolioManagement from './components/PortfolioManagement';
 import SystemMonitor from './components/SystemMonitor';
-import PersonalStats from './components/PersonalStats';
+import UserProfile from './components/UserProfile';
 import ApiService, { type UserInfo } from './services/api';
 import 'antd/dist/reset.css';
 import './App.css';
 
 const { Header, Content, Sider } = Layout;
-const { Title } = Typography;
+const { Title, Paragraph } = Typography;
 
-type MenuKey = 'dashboard' | 'backtest' | 'agents' | 'history' | 'portfolios' | 'monitor' | 'stats' | 'profile';
+type MenuKey =
+  | 'dashboard'
+  | 'backtest'
+  | 'agents'
+  | 'history'
+  | 'portfolios'
+  | 'monitor'
+  | 'stats'
+  | 'profile';
+
+const PAGE_META: Record<MenuKey, { title: string; subtitle: string }> = {
+  dashboard: {
+    title: '股票分析与多智能体协作',
+    subtitle: '以价值投资为主线，汇总多类 Agent 的分析路径、状态和最终联合决策。',
+  },
+  backtest: {
+    title: '策略回测实验台',
+    subtitle: '对比多智能体策略与基准表现，支持实验参数配置、指标复盘和收益曲线分析。',
+  },
+  agents: {
+    title: 'Agent 控制中心',
+    subtitle: '查看各 Agent 运行状态、类型、配置参数与系统协作关系。',
+  },
+  history: {
+    title: '历史运行档案',
+    subtitle: '统一浏览分析历史、回测记录、决策详情与图表结果。',
+  },
+  portfolios: {
+    title: '投资组合管理',
+    subtitle: '跟踪组合资产、持仓结构、交易记录和风险告警。',
+  },
+  monitor: {
+    title: '系统运维与监控',
+    subtitle: '查看平台运行健康度、接口状态和服务级监控数据。',
+  },
+  stats: {
+    title: '个人统计看板',
+    subtitle: '展示用户侧的使用概览、绩效指标和交互频率。',
+  },
+  profile: {
+    title: '个人设置',
+    subtitle: '管理账户信息、权限视图与个性化偏好。',
+  },
+};
 
 function App() {
   const [selectedMenu, setSelectedMenu] = useState<MenuKey>('dashboard');
@@ -42,26 +90,28 @@ function App() {
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // 检查用户是否已登录
   useEffect(() => {
     const checkAuth = async () => {
       const token = localStorage.getItem('auth_token');
-      if (token) {
-        try {
-          const response = await ApiService.getCurrentUser();
-          if (response.success && response.data) {
-            setUser(response.data);
-            setIsAuthenticated(true);
-          } else {
-            localStorage.removeItem('auth_token');
-            localStorage.removeItem('user_info');
-          }
-        } catch (error) {
+      if (!token) {
+        return;
+      }
+
+      try {
+        const response = await ApiService.getCurrentUser();
+        if (response.success && response.data) {
+          setUser(response.data);
+          setIsAuthenticated(true);
+        } else {
           localStorage.removeItem('auth_token');
           localStorage.removeItem('user_info');
         }
+      } catch {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user_info');
       }
     };
+
     checkAuth();
   }, []);
 
@@ -71,11 +121,10 @@ function App() {
 
   const handleBacktestStart = (runId: string) => {
     setCurrentBacktestId(runId);
-    setBacktestResult(null); // 清除之前的结果
+    setBacktestResult(null);
   };
 
   const handleBacktestComplete = (result: any) => {
-    console.log('Backtest completed:', result);
     setBacktestResult(result);
   };
 
@@ -91,18 +140,27 @@ function App() {
     setSelectedMenu('dashboard');
     setCurrentRunId(null);
     setCurrentBacktestId(null);
+    setBacktestResult(null);
   };
 
-  // 检查用户权限
   const hasPermission = (permission: string): boolean => {
-    return user?.permissions?.includes(permission) ||
-      user?.roles?.includes('admin') || false;
+    return (
+      user?.permissions?.includes(permission) ||
+      user?.roles?.includes('admin') ||
+      false
+    );
   };
 
-  // 如果未登录，显示登录页面
   if (!isAuthenticated) {
     return <LoginForm onLoginSuccess={handleLoginSuccess} />;
   }
+
+  const renderPermissionError = (title: string, description: string) => (
+    <div className="permission-error">
+      <Title level={3}>{title}</Title>
+      <p>{description}</p>
+    </div>
+  );
 
   const renderContent = () => {
     switch (selectedMenu) {
@@ -121,7 +179,7 @@ function App() {
       case 'backtest':
         return (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
-            {hasPermission('backtest:basic') && (
+            {hasPermission('backtest:basic') ? (
               <>
                 <BacktestForm onBacktestStart={handleBacktestStart} />
                 {currentBacktestId && (
@@ -130,102 +188,55 @@ function App() {
                     onComplete={handleBacktestComplete}
                   />
                 )}
-                {backtestResult && (
-                  <BacktestResult result={backtestResult} />
-                )}
+                {backtestResult && <BacktestResult result={backtestResult} />}
               </>
-            )}
-            {!hasPermission('backtest:basic') && (
-              <div className="permission-error">
-                <Title level={3}>权限不足</Title>
-                <p>您没有访问回测功能的权限</p>
-              </div>
+            ) : (
+              renderPermissionError('权限不足', '当前账户没有访问回测模块的权限。')
             )}
           </Space>
         );
       case 'agents':
-        return hasPermission('system:monitor') ? (
-          <AgentDashboard />
-        ) : (
-          <div className="permission-error">
-            <Title level={3}>权限不足</Title>
-            <p>您没有访问Agent管理功能的权限</p>
-          </div>
-        );
+        return hasPermission('system:monitor')
+          ? <AgentDashboard />
+          : renderPermissionError('权限不足', '当前账户没有访问 Agent 管理模块的权限。');
       case 'history':
         return <HistoryDashboard />;
       case 'portfolios':
-        return hasPermission('portfolio:read') ? (
-          <PortfolioManagement />
-        ) : (
-          <div className="permission-error">
-            <Title level={3}>权限不足</Title>
-            <p>您没有访问投资组合功能的权限</p>
-          </div>
-        );
+        return hasPermission('portfolio:read')
+          ? <PortfolioManagement />
+          : renderPermissionError('权限不足', '当前账户没有访问投资组合模块的权限。');
       case 'monitor':
-        return hasPermission('system:monitor') ? (
-          <SystemMonitor />
-        ) : (
-          <div className="permission-error">
-            <Title level={3}>权限不足</Title>
-            <p>您没有访问系统监控功能的权限</p>
-          </div>
-        );
+        return hasPermission('system:monitor')
+          ? <SystemMonitor />
+          : renderPermissionError('权限不足', '当前账户没有访问系统监控模块的权限。');
       case 'stats':
         return <PersonalStats />;
       case 'profile':
         return <UserProfile onUserUpdate={setUser} />;
       default:
-        return <div>页面未找到</div>;
+        return <div>页面未找到。</div>;
     }
   };
 
-  // 根据权限动态生成菜单项
   const menuItems = [
-    {
-      key: 'dashboard',
-      icon: <DashboardOutlined />,
-      label: '股票分析',
-    },
-    ...(hasPermission('backtest:basic') ? [{
-      key: 'backtest',
-      icon: <ExperimentOutlined />,
-      label: '策略回测',
-    }] : []),
-    ...(hasPermission('portfolio:read') ? [{
-      key: 'portfolios',
-      icon: <FundOutlined />,
-      label: '投资组合',
-    }] : []),
-    ...(hasPermission('system:monitor') ? [{
-      key: 'agents',
-      icon: <RobotOutlined />,
-      label: 'Agent管理',
-    }] : []),
-    {
-      key: 'history',
-      icon: <HistoryOutlined />,
-      label: '历史记录',
-    },
-    {
-      key: 'stats',
-      icon: <LineChartOutlined />,
-      label: '个人统计',
-    },
-    ...(hasPermission('system:monitor') ? [{
-      key: 'monitor',
-      icon: <MonitorOutlined />,
-      label: '系统监控',
-    }] : []),
-    {
-      key: 'profile',
-      icon: <SettingOutlined />,
-      label: '个人设置',
-    },
+    { key: 'dashboard', icon: <DashboardOutlined />, label: '股票分析' },
+    ...(hasPermission('backtest:basic')
+      ? [{ key: 'backtest', icon: <ExperimentOutlined />, label: '策略回测' }]
+      : []),
+    ...(hasPermission('portfolio:read')
+      ? [{ key: 'portfolios', icon: <FundOutlined />, label: '投资组合' }]
+      : []),
+    ...(hasPermission('system:monitor')
+      ? [{ key: 'agents', icon: <RobotOutlined />, label: 'Agent 控制' }]
+      : []),
+    { key: 'history', icon: <HistoryOutlined />, label: '历史记录' },
+    { key: 'stats', icon: <LineChartOutlined />, label: '个人统计' },
+    ...(hasPermission('system:monitor')
+      ? [{ key: 'monitor', icon: <MonitorOutlined />, label: '系统运维' }]
+      : []),
+    { key: 'profile', icon: <SettingOutlined />, label: '系统设置' },
   ];
 
-  // 用户菜单
   const userMenu = {
     items: [
       {
@@ -237,60 +248,90 @@ function App() {
     ],
   };
 
+  const activeTaskId =
+    selectedMenu === 'backtest' && currentBacktestId ? currentBacktestId : currentRunId;
+
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f5f5' }}>
-      <Header className="app-header" style={{
-        padding: '0 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div className="logo">
-          <BarChartOutlined className="logo-icon" />
-          A股投资Agent分析平台
+    <Layout className="app-shell">
+      <Sider width={248} className="app-sider" breakpoint="lg" collapsedWidth="0">
+        <div className="sider-brand">
+          <div className="logo">
+            <BarChartOutlined className="logo-icon" />
+            <div className="logo-copy">
+              <span className="logo-text">A-Share Agent Desk</span>
+              <span className="logo-subtitle">基于异构多智能体的 A 股价值投资分析系统</span>
+            </div>
+          </div>
+          <div className="sider-status-card">
+            <span className="sider-status-kicker">Intelligence Hub</span>
+            <strong>{hasPermission('system:monitor') ? '6' : '4'} 个活跃节点</strong>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <span style={{ color: 'white' }}>
-            欢迎，{user?.full_name || user?.username}
-          </span>
-          <Dropdown menu={userMenu} placement="bottomRight">
-            <Button
-              type="text"
-              icon={<Avatar size="small" icon={<UserOutlined />} />}
-              style={{ color: 'white' }}
+        <Menu
+          mode="inline"
+          selectedKeys={[selectedMenu]}
+          items={menuItems}
+          className="app-menu"
+          onSelect={({ key }) => setSelectedMenu(key as MenuKey)}
+        />
+
+        <div className="sider-footer">
+          <div className="sider-footer-item">
+            <QuestionCircleOutlined />
+            <span>帮助中心</span>
+          </div>
+          <div className="sider-footer-item">
+            <BookOutlined />
+            <span>文档说明</span>
+          </div>
+        </div>
+      </Sider>
+
+      <Layout className="app-main-layout">
+        <Header className="app-header">
+          <div className="app-header-search">
+            <Input
+              prefix={<SearchOutlined />}
+              placeholder="搜索股票代码，例如 600519.SH"
+              allowClear
             />
-          </Dropdown>
-        </div>
-      </Header>
+          </div>
 
-      <Layout>
-        <Sider
-          width={200}
-          className="app-sider"
-          breakpoint="lg"
-          collapsedWidth="0"
-        >
-          <Menu
-            mode="inline"
-            selectedKeys={[selectedMenu]}
-            items={menuItems}
-            className="app-menu"
-            style={{ height: '100%' }}
-            onSelect={({ key }) => setSelectedMenu(key as MenuKey)}
-          />
-        </Sider>
+          <div className="app-user-area">
+            <div className="market-pill">
+              <span className="market-dot" />
+              市场状态 OPEN
+            </div>
+            <Button type="text" className="header-icon-button" icon={<ReloadOutlined />} />
+            <Button type="text" className="header-icon-button" icon={<BellOutlined />} />
+            <Dropdown menu={userMenu} placement="bottomRight">
+              <Button className="app-user-button" type="text">
+                <Avatar size="small" icon={<UserOutlined />} />
+              </Button>
+            </Dropdown>
+          </div>
+        </Header>
 
-        <Layout style={{ padding: '16px', background: '#f5f5f5' }}>
+        <Layout className="app-workspace">
           <Content className="app-content">
             <div className="app-content-header">
-              <Title level={2} style={{ margin: 0, color: '#262626' }}>
-                {menuItems.find(item => item.key === selectedMenu)?.label}
-              </Title>
+              <div className="app-content-header-main">
+                <div className="app-content-kicker">A-Share Multi-Agent Workflow</div>
+                <Title level={2} className="app-content-title">
+                  {PAGE_META[selectedMenu].title}
+                </Title>
+                <Paragraph className="app-content-subtitle">
+                  {PAGE_META[selectedMenu].subtitle}
+                </Paragraph>
+              </div>
+              {activeTaskId && (
+                <div className="run-chip">
+                  当前任务 #{activeTaskId.slice(0, 8)}
+                </div>
+              )}
             </div>
-            <div className="app-content-body fade-in-up">
-              {renderContent()}
-            </div>
+            <div className="app-content-body fade-in-up">{renderContent()}</div>
           </Content>
         </Layout>
       </Layout>

@@ -48,7 +48,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     today_str = datetime.now().strftime("%Y-%m-%d")
     # 改为按月缓存：使用年-月作为缓存键
     month_str = datetime.now().strftime("%Y-%m")
-    output_file_path = os.path.join("src", "data", "macro_summary.json")
+    output_file_path = os.path.join("data", "macro_summary.json")
 
     # Attempt to load from cache first
     if os.path.exists(output_file_path):

@@ -52,11 +52,57 @@ export interface AnalysisRequest {
   show_summary?: boolean;
 }
 
+export interface AgentTokenUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  total?: number;
+  [key: string]: any;
+}
+
+export interface AgentMessage {
+  agent_id?: string;
+  agent_name?: string;
+  agent_type?: string;
+  signal?: string;
+  confidence?: number | string;
+  reasoning?: string;
+  summary?: string;
+  structured_data?: Record<string, any>;
+  execution_time_ms?: number;
+  token_usage?: number | string | AgentTokenUsage;
+  timestamp?: string;
+  [key: string]: any;
+}
+
+export interface AnalysisResult {
+  run_id?: string;
+  task_id?: string;
+  ticker?: string;
+  decision?: string;
+  action?: string;
+  signal?: string;
+  confidence?: number | string;
+  summary?: string;
+  reasoning?: string;
+  decision_reasoning?: string;
+  agent_outputs?: Record<string, AgentMessage>;
+  agent_signals?: Array<Record<string, any>>;
+  analyst_signals?: Array<Record<string, any>>;
+  [key: string]: any;
+}
+
+export interface AnalysisResultResponse {
+  task_id?: string;
+  result?: AnalysisResult;
+  [key: string]: any;
+}
+
 export interface AnalysisStatus {
   run_id: string;
   status: 'running' | 'completed' | 'failed';
   progress?: string;
-  result?: any;
+  ticker?: string;
+  result?: AnalysisResult;
 }
 
 // Agent接口
@@ -229,7 +275,7 @@ export class ApiService {
     return response.data;
   }
 
-  static async getAnalysisResult(runId: string): Promise<ApiResponse<any>> {
+  static async getAnalysisResult(runId: string): Promise<ApiResponse<AnalysisResultResponse | AnalysisResult>> {
     const response = await api.get(`/api/analysis/${runId}/result`);
     return response.data;
   }
