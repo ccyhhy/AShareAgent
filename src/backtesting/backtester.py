@@ -460,8 +460,8 @@ class IntelligentBacktester:
             else:
                 signals['sentiment'] = 'neutral'
             
-            # 总是执行成交量分析
-            if len(df) >= 10:
+            # 总是执行成交量分析，缺少 volume 字段时降级为 normal
+            if len(df) >= 10 and 'volume' in df.columns:
                 recent_volume = df['volume'].tail(3).mean()
                 avg_volume = df['volume'].tail(10).mean()
                 if recent_volume > avg_volume * 1.2:  # 成交量放大20%

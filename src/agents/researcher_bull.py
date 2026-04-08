@@ -183,7 +183,7 @@ def researcher_bull_agent(state: AgentState):
 
     message = HumanMessage(
         content=json.dumps(message_content),
-        name="researcher_bull",
+        name="researcher_bull_agent",
     )
 
     if show_reasoning:

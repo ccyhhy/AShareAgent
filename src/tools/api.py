@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
+import os
 import pandas as pd
 import akshare as ak
 import yfinance as yf
@@ -48,6 +49,8 @@ DATA_SOURCES = {
 }
 
 DEFAULT_LOCAL_CSV_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+
+REMOTE_PROVIDER_HINTS = {"remote", "remote_api", "akshare", "yfinance", "eastmoney"}
 
 # 重试装饰器
 def retry_on_failure(max_retries=3, delay=1):
@@ -158,6 +161,25 @@ def get_stock_code_for_yfinance(symbol: str) -> str:
 def _get_local_csv_provider(csv_dir: Union[str, Path, None] = None) -> LocalCSVProvider:
     base_dir = Path(csv_dir) if csv_dir else DEFAULT_LOCAL_CSV_DIR
     return LocalCSVProvider(base_dir=base_dir)
+
+
+def _is_truthy_env_var(name: str) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _allow_remote_fallback(
+    provider_preference: str | None,
+    local_only: bool,
+    *,
+    backtest_mode: bool,
+) -> bool:
+    if local_only or backtest_mode:
+        return False
+
+    explicit_preference = (provider_preference or "").strip().lower() in REMOTE_PROVIDER_HINTS
+    explicit_env_switch = _is_truthy_env_var("ASHAREAGENT_ALLOW_REMOTE_FALLBACK")
+    return explicit_preference or explicit_env_switch
 
 
 def _normalize_local_price_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -1128,16 +1150,34 @@ def get_price_history(
         - skewness: 偏度
         - kurtosis: 峰度
     """
-    try:
-        if provider_preference == "local_csv" or local_only:
-            local_df = _get_local_csv_provider(csv_dir).get_price_history(symbol, start_date, end_date)
-            if not local_df.empty:
-                logger.info(f"Using local CSV price history for {symbol}")
-                return _normalize_local_price_df(local_df)
+    backtest_mode = _is_truthy_env_var("ASHAREAGENT_BACKTEST_MODE")
+    allow_remote = _allow_remote_fallback(
+        provider_preference,
+        local_only,
+        backtest_mode=backtest_mode,
+    )
 
-            if local_only:
-                logger.warning(f"Local-only price history requested but no CSV data found for {symbol}")
-                return pd.DataFrame()
+    local_df = _get_local_csv_provider(csv_dir).get_price_history(symbol, start_date, end_date)
+    if not local_df.empty:
+        logger.info(f"[DATA_SOURCE] local_csv symbol={symbol}")
+        return _normalize_local_price_df(local_df)
+
+    if local_only:
+        logger.warning(f"[DATA_SOURCE] local_csv_miss(local_only=True) symbol={symbol}")
+        return pd.DataFrame()
+
+    if backtest_mode:
+        logger.warning(f"[DATA_SOURCE] local_csv_miss(backtest_mode=True,no_remote) symbol={symbol}")
+        return pd.DataFrame()
+
+    if not allow_remote:
+        logger.warning(
+            f"[DATA_SOURCE] local_csv_miss(remote_fallback_disabled) symbol={symbol}. "
+            "Set ASHAREAGENT_ALLOW_REMOTE_FALLBACK=1 or provider_preference='remote_api' to enable fallback."
+        )
+        return pd.DataFrame()
+
+    try:
 
         # 获取当前日期和昨天的日期
         current_date = datetime.now()
@@ -1378,7 +1418,7 @@ def get_price_history(
         df = df.reset_index(drop=True)
 
         logger.info(
-            f"Successfully fetched price history data ({len(df)} records)")
+            f"[DATA_SOURCE] remote_api(akshare) symbol={symbol} records={len(df)}")
 
         # 检查并报告NaN值
         df = _handle_nan_values(df)
@@ -1394,19 +1434,20 @@ def get_price_history(
 
     except Exception as e:
         logger.error(f"Error getting price history from akshare: {e}")
-        # 尝试替代数据源
+        if not allow_remote:
+            return pd.DataFrame()
+
         logger.info("Trying alternative data source (yfinance)...")
         try:
             df = get_stock_data_yfinance(symbol, start_date, end_date)
             if df is not None:
                 if not df.empty:
-                    # 为yfinance数据添加技术指标
                     df = _add_technical_indicators(df)
-                    logger.info(f"Successfully fetched price history from yfinance ({len(df)} records)")
+                    logger.info(f"[DATA_SOURCE] remote_api(yfinance) symbol={symbol} records={len(df)}")
                     return df
         except Exception as e2:
             logger.error(f"Yfinance fallback also failed: {e2}")
-        
+
         return pd.DataFrame()
 
 

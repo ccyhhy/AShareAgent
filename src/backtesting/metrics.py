@@ -71,7 +71,7 @@ class MetricsCalculator:
     def calculate_risk_metrics(daily_returns: List[float], 
                              benchmark_returns: List[float]) -> RiskMetrics:
         """计算修正的风险指标"""
-        if len(daily_returns) < 2:  # 最少需要2个数据点
+        if len(daily_returns) < 30:
             return RiskMetrics()
             
         returns_array = np.array(daily_returns)

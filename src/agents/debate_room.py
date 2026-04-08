@@ -15,6 +15,14 @@ def debate_room_agent(state: AgentState):
     """Facilitates debate between bull and bear researchers to reach a balanced conclusion."""
     show_workflow_status("Debate Room")
     show_reasoning = state["metadata"]["show_reasoning"]
+    researcher_aliases = {
+        "researcher_bull_agent": "researcher_bull",
+        "researcher_bear_agent": "researcher_bear",
+    }
+
+    def _canonical_researcher_name(name: str) -> str:
+        return researcher_aliases.get(name, name)
+
     logger.info("开始分析研究员观点并进行辩论...")
 
     # 收集所有研究员信息 - 向前兼容设计（添加防御性检查）
@@ -26,8 +34,9 @@ def debate_room_agent(state: AgentState):
         if not hasattr(msg, 'name') or msg.name is None:
             continue
         if isinstance(msg.name, str) and msg.name.startswith("researcher_"):
-            researcher_messages[msg.name] = msg
-            logger.debug(f"收集到研究员信息: {msg.name}")
+            canonical_name = _canonical_researcher_name(msg.name)
+            researcher_messages[canonical_name] = msg
+            logger.debug(f"收集到研究员信息: {msg.name} -> {canonical_name}")
 
     # 确保至少有看多和看空两个研究员
     if "researcher_bull" not in researcher_messages or "researcher_bear" not in researcher_messages:
