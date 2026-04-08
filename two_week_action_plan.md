@@ -1,9 +1,10 @@
-# 毕业设计执行指南（项目对齐与审计友好版 v3）
+# 毕业设计执行指南（项目对齐与审计友好版 v4）
 
 > 更新日期：2026-04-08  
 > 适用仓库：`AShareAgent` 当前工作区  
 > 本文用途：作为后续开发、论文撰写、联调验证和 Git 管理的统一执行标准  
 > 本版本替代旧版“14 天冲刺清单式指南”，改为“工程规范 + 阶段路线图 + 审计友好口径”
+> v4 重点修正：先做协议与命名收敛，再做 Agent 语义收敛，最后再上 RAG
 
 ---
 
@@ -36,7 +37,8 @@
 - `fundamentals.py` 仍是旧版规则式基本面分析，尚未升级为“护城河 + 证据检索”Agent
 - `sentiment.py` 仍是旧版新闻情绪分析，尚未升级为“财报质量/红旗 + 文本解释”混合 Agent
 - `macro_analyst.py` 仍是旧版宏观/新闻分析，尚未升级为“行业周期 + 政策敏感度”Agent
-- 统一输出协议仍未正式落地
+- 统一输出协议仍未正式落地，后端和前端还在兼容多种旧返回形态
+- Agent 命名、字段命名、语义边界尚未完全收敛，存在“名字和真实职责不一致”的问题
 - 前端对异构 Agent 的展示还未完全按新结构对齐
 - 消融实验框架未实现
 
@@ -187,6 +189,34 @@ graph TD
 - 本地缓存、日志、截图、预览文件
 - 会议记录类文件，除非明确需要纳入版本管理
 
+### 4.7 当前阶段优先解决“协议漂移”
+
+在继续增加新能力前，必须优先收敛以下问题：
+
+- 后端依赖 agent 名称映射、metadata 特判和多重 fallback 拼结果
+- 前端依赖多种返回形态和手动名称映射适配展示
+- `agent_outputs` 已有基础，但尚未成为真正稳定的统一出口
+
+因此，当前阶段的最高优先级不是“先加更多分析能力”，而是：
+
+1. 收敛消息命名
+2. 收敛 `agent_outputs`
+3. 让后端和前端逐步以稳定协议为主，而不是继续堆兼容层
+
+### 4.8 非核心范围冻结
+
+本项目当前阶段默认冻结以下范围，不再继续扩展功能：
+
+- 认证、权限、用户体系
+- 生产级监控、告警、审计平台化能力
+- Redis、CDN、WAF、集群、高可用部署等企业级包装
+- 与毕设主线无直接关系的后台外围能力
+
+说明：
+
+- 这些内容可以保留在现有仓库中，但不作为后续开发重点
+- 论文与答辩叙事应围绕异构 Agent、协议收敛、记忆型 RAG、联调验证和消融实验展开
+
 ---
 
 ## 5. 优化后的总体技术路线
@@ -197,10 +227,11 @@ graph TD
 
 优化后的技术路线应为：
 
-1. 结构化因子继续走确定性计算
-2. 主观分析类任务引入检索增强
-3. 统一输出协议逐步收敛
-4. 前端与实验框架围绕异构特征展开
+1. 先收敛协议和命名，降低系统解释成本
+2. 再收敛第一层 Agent 的语义边界
+3. 结构化因子继续走确定性计算
+4. 主观分析类任务引入检索增强
+5. 前端与实验框架围绕异构特征展开
 
 ### 5.2 异构架构分层
 
@@ -211,6 +242,18 @@ graph TD
 | 证据增强分析层 | 处理主观文本判断 | `fundamentals` / `sentiment` / `macro_analyst` | LLM + 检索 + 规则 |
 | 观点博弈层 | 多空观点整合 | `researcher_bull` / `researcher_bear` / `debate_room` | Prompt + 聚合 |
 | 决策层 | 最终交易建议 | `portfolio_manager` | 聚合决策 |
+
+### 5.3 当前阶段最优执行顺序
+
+按当前仓库状态，最优执行顺序不是“先上 RAG”，而是：
+
+1. 先统一消息命名和 `agent_outputs`
+2. 再明确第一层 4 个 Agent 的语义边界
+3. 修正 `technicals` 的命名或职责，使其不再伪装成传统技术分析
+4. 若要把 `sentiment` 改成财报质量 Agent，必须同步 researcher、portfolio 和前端语义
+5. 只给 `fundamentals` 先上 SQLite-first 的记忆型 RAG
+6. `macro_analyst` 先做稳定结构化输出和兜底，不急着做重检索
+7. 5 只股票联调跑通后，再做前端收敛和消融实验
 
 ---
 
@@ -428,7 +471,7 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 
 | 文件 | 目标角色 | 类型 | 状态 |
 |:--|:--|:--|:--|
-| `src/agents/technicals.py` | 估值位置分析 Agent | `rule_engine` | 已完成 |
+| `src/agents/technicals.py` | 相对估值位置 Agent（PB 百分位） | `rule_engine` | 已完成 |
 | `src/agents/valuation.py` | DCF 估值 Agent | `quantitative_model` | 已完成 |
 | `src/agents/risk_manager.py` | 风险评估 Agent | `statistical_model` | 已完成 |
 
@@ -437,12 +480,37 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 | 文件 | 目标角色 | 推荐实现 | 状态 |
 |:--|:--|:--|:--|
 | `src/agents/fundamentals.py` | 护城河/竞争优势 Agent | `llm_rag` | 待完成 |
-| `src/agents/sentiment.py` | 财报质量与文本红旗 Agent | `hybrid_rule_llm` | 待完成 |
+| `src/agents/sentiment.py` | 市场情绪 Agent 或财报质量 Agent（二选一后再落地） | `hybrid_rule_llm` | 待完成 |
 | `src/agents/macro_analyst.py` | 行业周期与政策敏感度 Agent | `llm` | 待完成 |
 
 ---
 
 ## 8. 三个待改造 Agent 的明确要求
+
+### 8.0 第一层 Agent 的语义边界必须先收敛
+
+当前第一层存在两个明显问题：
+
+- `technicals.py` 的实现是 PB 历史百分位相对估值，不是传统技术面分析
+- `sentiment.py` 当前代表市场新闻情绪，但规划中想改造成财报质量 Agent
+
+因此，在继续实现前必须先收敛语义边界：
+
+1. `technicals` 二选一：
+   - 方案 A：正式改名为“relative valuation”或“估值位置”
+   - 方案 B：恢复为真实技术指标 Agent
+2. `sentiment` 二选一：
+   - 方案 A：继续承担“市场情绪”职责
+   - 方案 B：升级为“财报质量/红旗”职责
+
+如果选择方案 B，则必须同步修改：
+
+- `researcher_bull.py`
+- `researcher_bear.py`
+- `portfolio_manager.py`
+- 前端展示文案
+
+不允许只改 `sentiment.py`，却保留下游把它当“市场情绪”的旧语义。
 
 ### 8.1 `fundamentals.py`：护城河与竞争优势 Agent
 
@@ -503,6 +571,9 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 - 即使 LLM 失败，规则层结果也必须可用
 - 输出至少包含：红旗数量、红旗清单、风险结论
 - 标准化结果写入 `state["data"]["agent_outputs"]["sentiment"]`
+- 下游 Prompt、字段语义和前端文案必须同步调整
+
+如果当前阶段不准备同步改下游，则应暂缓此改造，先保留 `sentiment` 的市场情绪职责。
 
 ### 8.3 `macro_analyst.py`：行业周期与政策敏感度 Agent
 
@@ -589,7 +660,53 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 
 ## 11. 剩余开发路线图
 
-### Day 4：知识库基线 + `fundamentals` 升级
+### 11.0 Day4-Day8 总表
+
+| 阶段 | 当天主任务 | 前置依赖 | 论文/答辩产出 | 当前状态 |
+|:--|:--|:--|:--|:--|
+| Day 4 | 协议收敛 + 命名收敛 | Day2-3 已完成 | 协议统一前后对比、命名规范说明、后端/前端兼容层收敛说明 | `待开始` |
+| Day 5 | 第一层 Agent 语义收敛 | Day 4 完成 | `technicals` 与 `valuation` 边界说明、`sentiment` 语义选择说明 | `待开始` |
+| Day 6 | `fundamentals` 记忆型 RAG + `knowledge_base.py` | Day 5 完成 | 记忆型 RAG 架构图、检索样例、检索前后对比 | `待开始` |
+| Day 7 | `macro_analyst` 稳定化 + 5 只股票联调 | Day 6 完成 | 联调截图、结构化输出样例、失败兜底样例 | `待开始` |
+| Day 8 | 前端收敛 + 消融实验框架 | Day 7 完成 | 前端异构展示截图、消融实验结果表、评价指标说明 | `待开始` |
+
+### 11.1 勾选版清单
+
+- [ ] Day 4：协议收敛 + 命名收敛
+- [ ] Day 5：第一层 Agent 语义收敛
+- [ ] Day 6：`fundamentals` 记忆型 RAG + `knowledge_base.py`
+- [ ] Day 7：`macro_analyst` 稳定化 + 5 只股票联调
+- [ ] Day 8：前端收敛 + 消融实验框架
+
+### 11.2 Day 4：协议收敛 + 命名收敛
+
+目标：
+
+- 让后端和前端逐步以 `agent_outputs` 为主，而不是继续堆兼容逻辑
+- 收敛消息命名、Agent 名称映射和 reasoning 键名
+- 补齐第一批协议层测试
+
+验收标准：
+
+- 后端不再依赖多层 agent-specific fallback 才能拿到核心结果
+- 前端展示链路优先消费稳定的 `agent_outputs`
+- 消息命名与输出键名有明确规范并落实到代码
+
+### 11.3 Day 5：第一层 Agent 语义收敛
+
+目标：
+
+- 明确 `technicals` 的最终命名与职责
+- 明确 `sentiment` 保留市场情绪还是升级为财报质量
+- 让 researcher、portfolio、前端文案与第一层 Agent 语义一致
+
+验收标准：
+
+- 不再存在“字段能通但语义错位”的隐性问题
+- `technicals` 与 `valuation` 的职责边界清晰
+- `sentiment` 的上下游解释口径统一
+
+### 11.4 Day 6：知识库基线 + `fundamentals` 升级
 
 目标：
 
@@ -605,20 +722,13 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 - 检索流程明确体现 `stock_code` 硬过滤
 - 单测覆盖检索成功、检索为空、知识库异常三类路径
 
-### Day 5：`sentiment` + `macro_analyst` 重写
+### 11.5 Day 7：`macro_analyst` 稳定化 + 5 只股票联调
 
 目标：
 
-- 完成规则红旗 + LLM 解释的 `sentiment`
-- 完成行业周期 + 政策敏感度的 `macro_analyst`
-
-验收标准：
-
-- 两个 Agent 都写入 `agent_outputs`
-- 失败路径都有兜底输出
-- 不破坏现有工作流连通性
-
-### Day 6：协议收敛 + 5 只股票联调
+- 完成 `macro_analyst` 的稳定结构化输出与兜底
+- 跑通 5 只股票联调
+- 确认前端展示链路与主流程结果一致
 
 建议测试标的：
 
@@ -630,45 +740,35 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 
 验收标准：
 
+- `macro_analyst` 写入稳定的 `agent_outputs`
 - 主流程可跑通
 - 输出结构稳定
 - 前端可消费核心字段
 
-### Day 7：前端最小必要增强
+### 11.6 Day 8：前端收敛 + 消融实验框架
 
 目标：
 
-- 展示 `agent_outputs`
-- 展示 `agent_type / signal / confidence`
-- 具备引用和性能字段的扩展位置
+- 前端减少兼容分支，逐步以稳定协议展示结果
+- 复用 `src/backtesting/` 构建消融实验
+- 在联调通过后再做异构与非异构对比
 
 验收标准：
 
 - 前端不需要花哨，但必须能看出“异构”而不是“一堆文本日志”
-
-### Day 8：消融实验框架
-
-目标：
-
-- 复用 `src/backtesting/`
-- 构建异构与非异构配置对比
-
-至少比较以下配置：
-
-- `full_heterogeneous`
-- `full_homogeneous`
-- `no_rule_agents`
-- `no_llm_agents`
-- `remove_single_agent_x`
-
-至少输出以下指标：
-
-- 年化收益
-- 夏普比率
-- 最大回撤
-- 平均响应时间
-- Token 消耗
-- API 可用性/降级次数
+- 至少比较以下配置：
+  - `full_heterogeneous`
+  - `full_homogeneous`
+  - `no_rule_agents`
+  - `no_llm_agents`
+  - `remove_single_agent_x`
+- 至少输出以下指标：
+  - 年化收益
+  - 夏普比率
+  - 最大回撤
+  - 平均响应时间
+  - Token 消耗
+  - API 可用性/降级次数
 
 ---
 
