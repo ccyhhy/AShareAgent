@@ -479,9 +479,9 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 
 | 文件 | 目标角色 | 推荐实现 | 状态 |
 |:--|:--|:--|:--|
-| `src/agents/fundamentals.py` | 护城河/竞争优势 Agent | `llm_rag` | 待完成 |
-| `src/agents/sentiment.py` | 市场情绪 Agent 或财报质量 Agent（二选一后再落地） | `hybrid_rule_llm` | 待完成 |
-| `src/agents/macro_analyst.py` | 行业周期与政策敏感度 Agent | `llm` | 待完成 |
+| `src/agents/fundamentals.py` | 基本面记忆增强 Agent（纵向变化检测） | `memory_enhanced_rule_engine` | Day7 进行中 |
+| `src/agents/sentiment.py` | 市场情绪 Agent（新闻） | `hybrid_rule_llm` | 已定稿（保持） |
+| `src/agents/macro_analyst.py` | 行业周期与政策敏感度 Agent（个股维度） | `llm` | Day7 进行中 |
 
 ---
 
@@ -512,12 +512,13 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 
 不允许只改 `sentiment.py`，却保留下游把它当“市场情绪”的旧语义。
 
-### 8.1 `fundamentals.py`：护城河与竞争优势 Agent
+### 8.1 `fundamentals.py`：基本面记忆增强 Agent（Day7 采用方案 A）
 
 目标：
 
-- 不再只做传统财务指标打分
-- 升级为“结构化财务事实 + 同标的历史记忆检索 + LLM 分析”的综合 Agent
+- 保持规则引擎的可重复性与回测稳定性
+- 升级为“结构化财务事实 + 同标的历史记忆检索 + 纵向变化检测”的综合 Agent
+- LLM 护城河定性分析作为后续可选增强，不纳入 Day7 必做范围
 
 建议分析维度：
 
@@ -527,6 +528,7 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 - 网络效应
 - 渠道或规模壁垒
 - 政策或牌照壁垒
+- 历史记忆对比（上期信号 vs 本期信号）
 
 最低输出要求：
 
@@ -547,33 +549,26 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 - 检索失败时仍返回合法 JSON
 - 检索时必须先按 `stock_code` 做硬过滤
 - 如有时间维度，再按 `quarter / as_of_date` 做二级过滤
+- 输出中补充纵向对比字段（例如 `memory_delta`）用于解释“信号变化原因”
 
-### 8.2 `sentiment.py`：财报质量与文本红旗 Agent
+### 8.2 `sentiment.py`：市场情绪 Agent（Day7 口径锁定）
 
 目标：
 
-- 从“简单新闻情绪”转向“规则红旗 + 文本解释”的混合路径
+- 保持“新闻驱动的市场情绪”职责，确保上下游语义一致
+- 财报质量/红旗路线暂缓，避免 Day7 引入跨模块语义迁移风险
 
-第一层规则建议：
+当前执行范围：
 
-- 应收账款增速显著高于营收增速
-- 经营现金流显著弱于净利润
-- 商誉占净资产比例过高
-- 存货周转率持续下滑
-
-第二层 LLM 职责：
-
-- 解释这些红旗意味着什么
-- 给出风险等级与结论摘要
+- 继续消费新闻抓取与情绪评分链路
+- 保持 `analysis_domain=market_sentiment` 与 `analysis_metric=news_sentiment_score_7d`
 
 必须满足：
 
-- 即使 LLM 失败，规则层结果也必须可用
-- 输出至少包含：红旗数量、红旗清单、风险结论
+- 即使 LLM 失败，情绪层结果也必须可用
+- 输出至少包含：情绪信号、情绪分数、解释摘要
 - 标准化结果写入 `state["data"]["agent_outputs"]["sentiment"]`
-- 下游 Prompt、字段语义和前端文案必须同步调整
-
-如果当前阶段不准备同步改下游，则应暂缓此改造，先保留 `sentiment` 的市场情绪职责。
+- 下游 Prompt、字段语义和前端文案保持“市场情绪（新闻）”一致口径
 
 ### 8.3 `macro_analyst.py`：行业周期与政策敏感度 Agent
 
@@ -729,6 +724,14 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 - 完成 `macro_analyst` 的稳定结构化输出与兜底
 - 跑通 5 只股票联调
 - 确认前端展示链路与主流程结果一致
+
+本轮 Day7 口径冻结（2026-04-09）：
+
+- `fundamentals` 采用方案 A：`rule_engine + memory_rag`，不在 Day7 引入 LLM 护城河推理
+- `sentiment` 保持市场情绪 Agent，不切换到财报质量语义
+- 保留 `macro_news_agent` 与 `macro_analyst_agent` 双节点并明确分工：
+  - `macro_news_agent`：市场面并行新闻汇总（指数级宏观背景）
+  - `macro_analyst_agent`：个股维度宏观影响判断（风险后阶段）
 
 建议测试标的：
 

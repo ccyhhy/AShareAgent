@@ -31,6 +31,21 @@ LLM_PROMPT_MACRO_ANALYSIS = """你是一名资深的A股市场宏观分析师。
 logger = setup_logger('macro_news_agent')
 
 
+def _is_backtest_mode() -> bool:
+    value = os.getenv("ASHAREAGENT_BACKTEST_MODE")
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ensure_agent_outputs(data: Dict[str, Any]) -> Dict[str, Any]:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
 @agent_endpoint("macro_news_agent", "获取沪深300全量新闻并进行宏观分析，为投资决策提供市场层面的宏观环境评估")
 def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     """
@@ -49,6 +64,48 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     # 改为按月缓存：使用年-月作为缓存键
     month_str = datetime.now().strftime("%Y-%m")
     output_file_path = os.path.join("data", "macro_summary.json")
+
+    if _is_backtest_mode():
+        summary = "Backtest mode active. Market-wide macro news crawling and LLM summary skipped."
+        macro_news_payload = {
+            "agent_type": "llm",
+            "analysis_domain": "macro_market_news",
+            "signal": "neutral",
+            "confidence": "50%",
+            "news_count": 0,
+            "summary": summary,
+            "loaded_from_cache": False,
+            "analysis_period": "monthly",
+            "summary_generated_on": month_str,
+            "backtest_mode": True,
+        }
+        new_message_content = (
+            f"Macro News Agent Analysis for {month_str} (from_cache=False):\n{summary}"
+        )
+        new_message = HumanMessage(content=new_message_content, name=agent_name)
+        updated_data = dict(state["data"])
+        agent_outputs = _ensure_agent_outputs(updated_data)
+        agent_outputs["macro_news_agent"] = macro_news_payload
+        show_workflow_status(f"{agent_name}: Execution finished (backtest deterministic fallback).")
+        return {
+            "messages": [new_message],
+            "data": {
+                **updated_data,
+                "macro_news_analysis_result": summary,
+                "macro_news_analysis": macro_news_payload,
+            },
+            "metadata": {
+                **state["metadata"],
+                f"{agent_name}_details": {
+                    "summary_generated_on": month_str,
+                    "analysis_period": "monthly",
+                    "news_count_for_summary": 0,
+                    "llm_summary_preview": summary,
+                    "loaded_from_cache": False,
+                    "backtest_mode": True,
+                },
+            },
+        }
 
     # Attempt to load from cache first
     if os.path.exists(output_file_path):
@@ -172,12 +229,31 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
         "llm_summary_preview": summary[:150] + "..." if len(summary) > 150 else summary,
         "loaded_from_cache": from_cache
     }
+    macro_news_payload = {
+        "agent_type": "llm",
+        "analysis_domain": "macro_market_news",
+        "signal": "neutral",
+        "confidence": "60%",
+        "news_count": retrieved_news_count,
+        "summary": summary,
+        "loaded_from_cache": from_cache,
+        "analysis_period": "monthly",
+        "summary_generated_on": month_str,
+        "backtest_mode": False,
+    }
+    updated_data = dict(state["data"])
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["macro_news_agent"] = macro_news_payload
     # logger.info(f"--- DEBUG: macro_news_agent COMPLETED ---")
     # logger.info(
     # f"--- DEBUG: macro_news_agent RETURN messages: {[msg.name for msg in [new_message]]} ---")
     return {
         "messages": [new_message],
-        "data": {**state["data"], "macro_news_analysis_result": summary},
+        "data": {
+            **updated_data,
+            "macro_news_analysis_result": summary,
+            "macro_news_analysis": macro_news_payload,
+        },
         "metadata": {
             **state["metadata"],
             f"{agent_name}_details": agent_details_for_metadata

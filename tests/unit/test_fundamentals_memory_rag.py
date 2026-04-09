@@ -106,3 +106,35 @@ def test_fundamentals_agent_survives_knowledge_base_failures(monkeypatch):
     assert result["data"]["agent_outputs"]["fundamentals"] == result["data"]["fundamental_analysis"]
     assert result["data"]["agent_outputs"]["fundamentals"]["memory_scope"]["status"] == "unavailable"
     assert result["metadata"]["agent_reasoning"] == result["data"]["agent_outputs"]["fundamentals"]
+
+
+def test_fundamentals_agent_reports_longitudinal_memory_delta(monkeypatch):
+    monkeypatch.setattr(fundamentals_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(fundamentals_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+
+    class FakeKnowledgeBase:
+        def retrieve_fundamentals_refs(self, stock_code: str, limit: int, as_of_date: str | None = None):
+            return [
+                {
+                    "analysis_date": "2026-03-31",
+                    "signal": "bearish",
+                    "confidence": "25%",
+                    "payload": {"signal": "bearish"},
+                }
+            ]
+
+        def save_fundamentals_memory(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(fundamentals_module, "_get_knowledge_base", lambda: FakeKnowledgeBase())
+
+    result = fundamentals_module.fundamentals_agent(_make_state())
+    output = result["data"]["agent_outputs"]["fundamentals"]
+
+    assert output["analysis_mode"] == "memory_enhanced_rule_engine"
+    assert output["memory_delta"]["status"] == "ok"
+    assert output["memory_delta"]["previous_signal"] == "bearish"
+    assert output["memory_delta"]["current_signal"] == output["signal"]
+    assert output["memory_delta"]["change_type"] in {"signal_reversal", "confidence_shift", "stable"}
+    assert output["memory_delta"]["summary"]
+    assert output["reasoning"]["memory_comparison"] == output["memory_delta"]["summary"]

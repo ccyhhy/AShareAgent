@@ -41,6 +41,97 @@ def _build_memory_scope(stock_code: str | None) -> dict[str, Any]:
     }
 
 
+def _normalize_signal(value: Any) -> str:
+    signal = str(value or "").strip().lower()
+    if signal in {"bullish", "bearish", "neutral"}:
+        return signal
+    return "unknown"
+
+
+def _parse_confidence_percent(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        score = float(value)
+        if 0 <= score <= 1:
+            score *= 100.0
+        return max(0.0, min(score, 100.0))
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("%"):
+        text = text[:-1].strip()
+    try:
+        score = float(text)
+    except ValueError:
+        return None
+    if 0 <= score <= 1:
+        score *= 100.0
+    return max(0.0, min(score, 100.0))
+
+
+def _build_memory_delta(
+    *,
+    current_signal: str,
+    current_confidence: str,
+    retrieved_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not retrieved_refs:
+        return {
+            "status": "no_history",
+            "changed": False,
+            "summary": "No prior fundamentals memory available for longitudinal comparison.",
+        }
+
+    latest_ref = retrieved_refs[0]
+    previous_signal = _normalize_signal(latest_ref.get("signal"))
+    previous_confidence = _parse_confidence_percent(latest_ref.get("confidence"))
+    current_conf = _parse_confidence_percent(current_confidence)
+
+    signal_changed = previous_signal != "unknown" and previous_signal != current_signal
+    confidence_delta = None
+    confidence_regime_changed = False
+    if previous_confidence is not None and current_conf is not None:
+        confidence_delta = round(current_conf - previous_confidence, 2)
+        confidence_regime_changed = abs(confidence_delta) >= 20.0
+
+    if signal_changed:
+        summary = (
+            f"Signal changed from {previous_signal} ({latest_ref.get('analysis_date', 'n/a')}) "
+            f"to {current_signal}."
+        )
+    elif confidence_regime_changed and confidence_delta is not None:
+        direction = "increased" if confidence_delta > 0 else "decreased"
+        summary = (
+            f"Signal stayed {current_signal}, confidence {direction} by {abs(confidence_delta):.2f} points "
+            f"vs {latest_ref.get('analysis_date', 'n/a')}."
+        )
+    else:
+        summary = (
+            f"Signal remained {current_signal} versus latest memory "
+            f"({latest_ref.get('analysis_date', 'n/a')})."
+        )
+
+    return {
+        "status": "ok",
+        "changed": signal_changed or confidence_regime_changed,
+        "change_type": (
+            "signal_reversal"
+            if signal_changed
+            else "confidence_shift"
+            if confidence_regime_changed
+            else "stable"
+        ),
+        "previous_signal": previous_signal,
+        "current_signal": current_signal,
+        "previous_confidence": latest_ref.get("confidence"),
+        "current_confidence": current_confidence,
+        "confidence_delta_points": confidence_delta,
+        "latest_ref_date": latest_ref.get("analysis_date"),
+        "summary": summary,
+    }
+
+
 ##### Fundamental Agent #####
 
 
@@ -203,14 +294,23 @@ def fundamentals_agent(state: AgentState):
     # Calculate confidence level
     total_signals = len(signals)
     confidence = max(bullish_signals, bearish_signals) / total_signals
+    confidence_text = f"{round(confidence * 100)}%"
+    memory_delta = _build_memory_delta(
+        current_signal=overall_signal,
+        current_confidence=confidence_text,
+        retrieved_refs=retrieved_refs,
+    )
+    reasoning["memory_comparison"] = memory_delta["summary"]
 
     message_content = {
         "agent_type": "rule_engine",
+        "analysis_mode": "memory_enhanced_rule_engine",
         "signal": overall_signal,
-        "confidence": f"{round(confidence * 100)}%",
+        "confidence": confidence_text,
         "reasoning": reasoning,
         "retrieved_refs": retrieved_refs,
         "memory_scope": memory_scope,
+        "memory_delta": memory_delta,
     }
 
     # Create the fundamental analysis message

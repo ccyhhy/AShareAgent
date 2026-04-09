@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -33,6 +34,13 @@ def _with_sentiment_semantics(payload: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
+def _is_backtest_mode() -> bool:
+    value = os.getenv("ASHAREAGENT_BACKTEST_MODE")
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @agent_endpoint(
     "sentiment",
     "Market sentiment analyst (rule engine), evaluates recent news sentiment.",
@@ -46,6 +54,45 @@ def sentiment_agent(state: AgentState):
     logger.info("Analyzing sentiment for ticker: %s", symbol)
 
     num_of_news = data.get("num_of_news", 20)
+
+    if _is_backtest_mode():
+        message_content = _with_sentiment_semantics(
+            {
+                "agent_type": "rule_engine",
+                "signal": "neutral",
+                "confidence": "50%",
+                "reasoning": (
+                    "Backtest mode active. Remote news crawling and sentiment model calls skipped."
+                ),
+                "sentiment_score": 0.0,
+                "news_count": 0,
+                "news_window_days": NEWS_LOOKBACK_DAYS,
+            }
+        )
+
+        if show_reasoning:
+            show_agent_reasoning(message_content, "Market Sentiment Analysis Agent")
+
+        updated_data = dict(data)
+        agent_outputs = _ensure_agent_outputs(updated_data)
+        agent_outputs["sentiment"] = message_content
+        state["metadata"]["agent_reasoning"] = message_content
+
+        message = HumanMessage(
+            content=json.dumps(message_content, ensure_ascii=False),
+            name="sentiment_agent",
+        )
+
+        show_workflow_status("Sentiment Analyst", "completed")
+        return {
+            "messages": [message],
+            "data": {
+                **updated_data,
+                "sentiment_analysis": message_content,
+            },
+            "metadata": state["metadata"],
+        }
+
     end_date = data.get("end_date")
     news_list = get_stock_news(symbol, max_news=num_of_news, date=end_date) or []
 

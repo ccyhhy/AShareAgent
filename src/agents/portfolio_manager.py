@@ -1,4 +1,5 @@
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as ConcurrentTimeoutError
 from typing import Any
 
@@ -10,6 +11,13 @@ from src.utils.api_utils import agent_endpoint, log_llm_interaction
 from src.utils.logging_config import setup_logger
 
 logger = setup_logger("portfolio_management_agent")
+
+
+def _is_backtest_mode() -> bool:
+    value = os.getenv("ASHAREAGENT_BACKTEST_MODE")
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_latest_message_by_name(messages: list, name: str):
@@ -28,6 +36,34 @@ def _safe_json_loads(content: str, default: Any) -> Any:
         return json.loads(content)
     except Exception:
         return default
+
+
+def _extract_agent_output_payload(
+    data: dict[str, Any],
+    *,
+    primary_key: str,
+    compatibility_keys: list[str] | None = None,
+) -> dict[str, Any] | None:
+    compatibility_keys = compatibility_keys or []
+    agent_outputs = data.get("agent_outputs")
+    if isinstance(agent_outputs, dict):
+        for key in [primary_key, *compatibility_keys]:
+            candidate = agent_outputs.get(key)
+            if isinstance(candidate, dict):
+                return candidate
+    for key in compatibility_keys:
+        candidate = data.get(key)
+        if isinstance(candidate, dict):
+            return candidate
+    return None
+
+
+def _as_prompt_payload(payload: dict[str, Any] | None, fallback_content: str, fallback_error: str) -> str:
+    if isinstance(payload, dict):
+        return json.dumps(payload, ensure_ascii=False)
+    if fallback_content:
+        return fallback_content
+    return json.dumps({"signal": "error", "details": fallback_error}, ensure_ascii=False)
 
 
 def _default_decision() -> dict[str, Any]:
@@ -78,23 +114,67 @@ def portfolio_management_agent(state: AgentState):
     bull_researcher_message = get_latest_message_by_name(cleaned_messages_for_processing, "researcher_bull")
     bear_researcher_message = get_latest_message_by_name(cleaned_messages_for_processing, "researcher_bear")
 
-    technical_content = technical_message.content if technical_message else json.dumps(
-        {"signal": "error", "details": "Relative valuation message missing"}
+    data_section = state.get("data", {})
+    technical_payload = _extract_agent_output_payload(
+        data_section,
+        primary_key="technicals",
+        compatibility_keys=["relative_valuation", "relative_valuation_analysis", "technical_analysis"],
     )
-    fundamentals_content = fundamentals_message.content if fundamentals_message else json.dumps(
-        {"signal": "error", "details": "Fundamentals message missing"}
+    fundamentals_payload = _extract_agent_output_payload(
+        data_section,
+        primary_key="fundamentals",
+        compatibility_keys=["fundamental_analysis"],
     )
-    sentiment_content = sentiment_message.content if sentiment_message else json.dumps(
-        {"signal": "error", "details": "Market sentiment message missing"}
+    sentiment_payload = _extract_agent_output_payload(
+        data_section,
+        primary_key="sentiment",
+        compatibility_keys=["sentiment_analysis"],
     )
-    valuation_content = valuation_message.content if valuation_message else json.dumps(
-        {"signal": "error", "details": "Valuation message missing"}
+    valuation_payload = _extract_agent_output_payload(
+        data_section,
+        primary_key="valuation",
+        compatibility_keys=["valuation_analysis"],
     )
-    risk_content = risk_message.content if risk_message else json.dumps(
-        {"signal": "error", "details": "Risk message missing"}
+    risk_payload = _extract_agent_output_payload(
+        data_section,
+        primary_key="risk_manager",
+        compatibility_keys=["risk_management", "risk_analysis"],
     )
-    macro_content = macro_message.content if macro_message else json.dumps(
-        {"signal": "error", "details": "Macro message missing"}
+    macro_payload = _extract_agent_output_payload(
+        data_section,
+        primary_key="macro_analyst",
+        compatibility_keys=["macro_analysis"],
+    )
+
+    technical_content = _as_prompt_payload(
+        technical_payload,
+        technical_message.content if technical_message else "",
+        "Relative valuation message missing",
+    )
+    fundamentals_content = _as_prompt_payload(
+        fundamentals_payload,
+        fundamentals_message.content if fundamentals_message else "",
+        "Fundamentals message missing",
+    )
+    sentiment_content = _as_prompt_payload(
+        sentiment_payload,
+        sentiment_message.content if sentiment_message else "",
+        "Market sentiment message missing",
+    )
+    valuation_content = _as_prompt_payload(
+        valuation_payload,
+        valuation_message.content if valuation_message else "",
+        "Valuation message missing",
+    )
+    risk_content = _as_prompt_payload(
+        risk_payload,
+        risk_message.content if risk_message else "",
+        "Risk message missing",
+    )
+    macro_content = _as_prompt_payload(
+        macro_payload,
+        macro_message.content if macro_message else "",
+        "Macro message missing",
     )
     bull_researcher_content = bull_researcher_message.content if bull_researcher_message else json.dumps(
         {"signal": "error", "details": "Bull researcher message missing"}
@@ -127,13 +207,13 @@ Required JSON fields:
 
     user_message_content = f"""Based on the team's analysis below, make the final trading decision.
 
-Relative Valuation Signal (PB Percentile): {technical_content}
-Fundamental Analysis Signal: {fundamentals_content}
-Market Sentiment Signal (News-based): {sentiment_content}
-Valuation Analysis Signal: {valuation_content}
-Risk Management Signal: {risk_content}
-Macro Analysis Signal: {macro_content}
-Market-Wide News Summary: {market_wide_news_summary_content}
+Relative Valuation Signal (PB Percentile, prefer structured agent_outputs): {technical_content}
+Fundamental Analysis Signal (prefer structured agent_outputs): {fundamentals_content}
+Market Sentiment Signal (News-based, prefer structured agent_outputs): {sentiment_content}
+Valuation Analysis Signal (prefer structured agent_outputs): {valuation_content}
+Risk Management Signal (prefer structured agent_outputs): {risk_content}
+Macro Stock-Level Analysis Signal (post-risk stage): {macro_content}
+Macro Market-Wide News Summary Signal (parallel stage): {market_wide_news_summary_content}
 Bull Researcher Analysis: {bull_researcher_content}
 Bear Researcher Analysis: {bear_researcher_content}
 
@@ -147,33 +227,44 @@ Portfolio state:
         {"role": "user", "content": user_message_content},
     ]
 
-    show_agent_reasoning(
-        agent_name,
-        "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
-    )
-
-    def call_llm():
-        return get_chat_completion(llm_interaction_messages)
-
-    try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(call_llm)
-            llm_response_content = future.result(timeout=90)
-    except ConcurrentTimeoutError:
-        logger.error("%s: LLM call timeout after 90 seconds", agent_name)
+    if _is_backtest_mode():
+        show_agent_reasoning(
+            agent_name,
+            "Backtest mode active. Skip remote LLM call and use deterministic conservative decision.",
+        )
         llm_response_content = None
-    except Exception as exc:
-        logger.error("%s: LLM call failed: %s", agent_name, exc)
-        llm_response_content = None
-
-    state["metadata"]["current_agent_name"] = agent_name
-    log_llm_interaction(state)(lambda: llm_response_content)()
-
-    if llm_response_content is None:
-        show_agent_reasoning(agent_name, "LLM call failed. Using default conservative decision.")
         decision_json = _default_decision()
+        decision_json["reasoning"] = (
+            "Backtest mode active. Remote LLM call skipped; using deterministic conservative hold decision."
+        )
     else:
-        decision_json = _safe_json_loads(llm_response_content, _default_decision())
+        show_agent_reasoning(
+            agent_name,
+            "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
+        )
+
+        def call_llm():
+            return get_chat_completion(llm_interaction_messages)
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(call_llm)
+                llm_response_content = future.result(timeout=90)
+        except ConcurrentTimeoutError:
+            logger.error("%s: LLM call timeout after 90 seconds", agent_name)
+            llm_response_content = None
+        except Exception as exc:
+            logger.error("%s: LLM call failed: %s", agent_name, exc)
+            llm_response_content = None
+
+        state["metadata"]["current_agent_name"] = agent_name
+        log_llm_interaction(state)(lambda: llm_response_content)()
+
+        if llm_response_content is None:
+            show_agent_reasoning(agent_name, "LLM call failed. Using default conservative decision.")
+            decision_json = _default_decision()
+        else:
+            decision_json = _safe_json_loads(llm_response_content, _default_decision())
 
     bull_researcher_data = _safe_json_loads(bull_researcher_content, {})
     bear_researcher_data = _safe_json_loads(bear_researcher_content, {})
