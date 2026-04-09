@@ -1,6 +1,6 @@
 ﻿# 毕业设计执行指南（项目对齐与审计友好版 v4）
 
-> 更新日期：2026-04-08  
+> 更新日期：2026-04-09  
 > 适用仓库：`AShareAgent` 当前工作区  
 > 本文用途：作为后续开发、论文撰写、联调验证和 Git 管理的统一执行标准  
 > 本版本替代旧版“14 天冲刺清单式指南”，改为“工程规范 + 阶段路线图 + 审计友好口径”
@@ -19,7 +19,7 @@
 
 ---
 
-## 2. 截至 2026-04-08 的真实项目状态
+## 2. 截至 2026-04-09 的真实项目状态
 
 ### 2.1 已完成
 
@@ -30,17 +30,18 @@
   - `src/agents/valuation.py` -> `quantitative_model`
   - `src/agents/risk_manager.py` -> `statistical_model`
 - 已完成 `market_data.py` 的 local-first 和 backtest-safe 改造：`src/agents/market_data.py`
-- `tests/unit` 当前验证结果：`121 passed`
+- `tests/unit` 当前验证结果：`140 passed`
 
-### 2.2 尚未完成
+### 2.2 本轮收尾后状态（2026-04-09）
 
-- `fundamentals.py` 仍是旧版规则式基本面分析，尚未升级为“护城河 + 证据检索”Agent
-- `sentiment.py` 仍是旧版新闻情绪分析，尚未升级为“财报质量/红旗 + 文本解释”混合 Agent
-- `macro_analyst.py` 仍是旧版宏观/新闻分析，尚未升级为“行业周期 + 政策敏感度”Agent
-- 统一输出协议仍未正式落地，后端和前端还在兼容多种旧返回形态
-- Agent 命名、字段命名、语义边界尚未完全收敛，存在“名字和真实职责不一致”的问题
-- 前端对异构 Agent 的展示还未完全按新结构对齐
-- 消融实验框架未实现
+- Day4-Day8 主线任务已完成并落地：
+  - 协议收敛：`agent_outputs` 为主，`agent_results` 兼容镜像
+  - 第一层 Agent 语义收敛：`technicals`/`valuation` 边界与 `sentiment` 口径已锁定
+  - `fundamentals` 已采用方案 A：`memory_enhanced_rule_engine`（SQLite-first 记忆检索）
+  - `macro_analyst` 稳定化已完成，回测模式下具备 backtest-safe 保护
+  - 5 只股票联调已跑通：`600519/000333/601398/002415/601857`
+  - Day8 消融实验框架与前端异构展示已完成
+- 当前剩余事项以论文与答辩材料整理为主，不再是主流程代码阻塞项
 
 ### 2.3 当前真实工作流
 
@@ -662,16 +663,16 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 | Day 4 | 协议收敛 + 命名收敛 | Day2-3 已完成 | 协议统一前后对比、命名规范说明、后端/前端兼容层收敛说明 | `已完成` |
 | Day 5 | 第一层 Agent 语义收敛 | Day 4 完成 | `technicals` 与 `valuation` 边界说明、`sentiment` 语义选择说明 | `已完成` |
 | Day 6 | `fundamentals` 记忆型 RAG + `knowledge_base.py` | Day 5 完成 | 记忆型 RAG 架构图、检索样例、检索前后对比 | `已完成` |
-| Day 7 | `macro_analyst` 稳定化 + 5 只股票联调 | Day 6 完成 | 联调截图、结构化输出样例、失败兜底样例 | `待开始` |
-| Day 8 | 前端收敛 + 消融实验框架 | Day 7 完成 | 前端异构展示截图、消融实验结果表、评价指标说明 | `待开始` |
+| Day 7 | `macro_analyst` 稳定化 + 5 只股票联调 | Day 6 完成 | 联调截图、结构化输出样例、失败兜底样例 | `已完成` |
+| Day 8 | 前端收敛 + 消融实验框架 | Day 7 完成 | 前端异构展示截图、消融实验结果表、评价指标说明 | `已完成` |
 
 ### 11.1 勾选版清单
 
 - [x] Day 4：协议收敛 + 命名收敛
 - [x] Day 5：第一层 Agent 语义收敛
 - [x] Day 6：`fundamentals` 记忆型 RAG + `knowledge_base.py`
-- [ ] Day 7：`macro_analyst` 稳定化 + 5 只股票联调
-- [ ] Day 8：前端收敛 + 消融实验框架
+- [x] Day 7：`macro_analyst` 稳定化 + 5 只股票联调
+- [x] Day 8：前端收敛 + 消融实验框架
 
 ### 11.2 Day 4：协议收敛 + 命名收敛
 
@@ -748,6 +749,12 @@ RAG 不应把整段原文塞进 `state["messages"]`。
 - 输出结构稳定
 - 前端可消费核心字段
 
+完成状态（2026-04-09）：
+
+- 已完成 5 只股票联调并产出结果：`artifacts/day9/five_ticker_integration.csv`
+- `macro_analyst` 输出结构稳定，且在回测模式下具备 deterministic fallback
+- `agent_outputs` 闭环可用，主流程无阻塞
+
 ### 11.6 Day 8：前端收敛 + 消融实验框架
 
 目标：
@@ -772,6 +779,17 @@ RAG 不应把整段原文塞进 `state["messages"]`。
   - 平均响应时间
   - Token 消耗
   - API 可用性/降级次数
+
+完成状态（2026-04-09）：
+
+- 前端已可视化展示 `agent_type` 与结构化 `agent_outputs`
+- 消融框架已落地并输出 5 组配置结果：
+  - `full_heterogeneous`
+  - `full_homogeneous`
+  - `no_rule_agents`
+  - `no_llm_agents`
+  - `remove_single_agent_x`
+- 结果产物位于：`artifacts/day9/ablation_metrics.csv`
 
 ---
 
