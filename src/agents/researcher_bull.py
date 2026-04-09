@@ -1,4 +1,4 @@
-﻿import ast
+import ast
 import json
 
 from langchain_core.messages import HumanMessage
@@ -192,7 +192,7 @@ def researcher_bull_agent(state: AgentState):
     result_metadata["researcher_bull_reasoning"] = message_content
 
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": state["data"],
         "metadata": result_metadata,
     }

@@ -53,10 +53,10 @@ class TestResearcherBullAgent:
         
         # 验证结果
         assert "messages" in result
-        assert len(result["messages"]) == len(state["messages"]) + 1
+        assert len(result["messages"]) == 1
         
         # 检查新消息
-        new_message = result["messages"][-1]
+        new_message = result["messages"][0]
         assert new_message.name == "researcher_bull_agent"
         
         # 解析消息内容
@@ -96,7 +96,7 @@ class TestResearcherBullAgent:
         result = researcher_bull_agent(state)
         
         # 验证多头研究员仍然能找到看多理由
-        new_message = result["messages"][-1]
+        new_message = result["messages"][0]
         content = json.loads(new_message.content)
         
         assert content["perspective"] == "bullish"
@@ -134,7 +134,7 @@ class TestResearcherBullAgent:
         state["messages"] = [technical_msg, fundamental_msg, sentiment_msg, valuation_msg]
         
         result = researcher_bull_agent(state)
-        new_message = result["messages"][-1]
+        new_message = result["messages"][0]
         content = json.loads(new_message.content)
         
         # 检查A股特色因素
@@ -178,7 +178,7 @@ class TestResearcherBearAgent:
         result = researcher_bear_agent(state)
         
         # 验证结果
-        new_message = result["messages"][-1]
+        new_message = result["messages"][0]
         content = json.loads(new_message.content)
         
         assert content["perspective"] == "bearish"
@@ -213,7 +213,7 @@ class TestResearcherBearAgent:
         state["messages"] = [technical_msg, fundamental_msg, sentiment_msg, valuation_msg]
         
         result = researcher_bear_agent(state)
-        new_message = result["messages"][-1]
+        new_message = result["messages"][0]
         content = json.loads(new_message.content)
         
         # 空头研究员应该在强劲信号中找到风险
@@ -254,7 +254,7 @@ class TestResearcherBearAgent:
         state["messages"] = [technical_msg, fundamental_msg, sentiment_msg, valuation_msg]
         
         result = researcher_bear_agent(state)
-        new_message = result["messages"][-1]
+        new_message = result["messages"][0]
         content = json.loads(new_message.content)
         
         # 检查风险集中度分析
@@ -297,8 +297,8 @@ class TestResearcherAgentsComparison:
         bull_result = researcher_bull_agent(state)
         bear_result = researcher_bear_agent(state)
         
-        bull_content = json.loads(bull_result["messages"][-1].content)
-        bear_content = json.loads(bear_result["messages"][-1].content)
+        bull_content = json.loads(bull_result["messages"][0].content)
+        bear_content = json.loads(bear_result["messages"][0].content)
         
         # 验证对立观点
         assert bull_content["perspective"] == "bullish"
@@ -340,8 +340,8 @@ class TestResearcherAgentsComparison:
         bull_result = researcher_bull_agent(state)
         bear_result = researcher_bear_agent(state)
         
-        bull_confidence = json.loads(bull_result["messages"][-1].content)["confidence"]
-        bear_confidence = json.loads(bear_result["messages"][-1].content)["confidence"]
+        bull_confidence = json.loads(bull_result["messages"][0].content)["confidence"]
+        bear_confidence = json.loads(bear_result["messages"][0].content)["confidence"]
         
         # 验证置信度的合理性
         assert 0 <= bull_confidence <= 1

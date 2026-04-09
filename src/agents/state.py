@@ -10,7 +10,18 @@ logger = setup_logger('agent_state')
 
 
 def merge_dicts(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
-    return {**a, **b}
+    """Merge two dicts with one-level deep merge for nested dict values.
+
+    This prevents parallel agents from overwriting each other's entries
+    when writing to shared nested dicts like ``agent_outputs``.
+    """
+    merged = {**a}
+    for key, value in b.items():
+        if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+            merged[key] = {**merged[key], **value}
+        else:
+            merged[key] = value
+    return merged
 
 # Define agent state
 

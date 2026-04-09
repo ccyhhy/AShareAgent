@@ -286,7 +286,7 @@ def debate_room_agent(state: AgentState):
     show_workflow_status("A股特色辩论室", "completed")
     logger.info(f"A股辩论室分析完成: {final_signal}, 置信度: {confidence:.3f}")
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": {
             **state["data"],
             "debate_analysis": message_content,

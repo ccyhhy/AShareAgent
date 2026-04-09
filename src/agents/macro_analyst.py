@@ -1,3 +1,5 @@
+import os
+
 from langchain_core.messages import HumanMessage
 from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
 from src.tools.news_crawler import get_stock_news
@@ -119,6 +121,37 @@ def macro_analyst_agent(state: AgentState):
     symbol = data["ticker"]
     logger.info(f"正在进行宏观分析: {symbol}")
 
+    # --- Backtest-safe guard: skip all remote calls in backtest mode ---
+    _backtest_mode = os.getenv("ASHAREAGENT_BACKTEST_MODE", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if _backtest_mode:
+        logger.info("Backtest mode enabled: returning deterministic macro fallback")
+        message_content = _normalize_macro_message({
+            "macro_environment": "neutral",
+            "impact_on_stock": "neutral",
+            "key_factors": ["回测模式：跳过远程新闻和LLM调用"],
+            "reasoning": "Backtest mode active. Remote news crawling and LLM calls skipped for reproducibility.",
+            "signal": "neutral",
+            "confidence": "50%",
+        })
+        message = HumanMessage(
+            content=json.dumps(message_content, ensure_ascii=False),
+            name="macro_analyst_agent",
+        )
+        if show_reasoning:
+            show_agent_reasoning(message_content, "Macro Analysis Agent")
+        updated_data = dict(data)
+        agent_outputs = _ensure_agent_outputs(updated_data)
+        agent_outputs["macro_analyst"] = message_content
+        state["metadata"]["agent_reasoning"] = message_content
+        show_workflow_status("Macro Analyst", "completed")
+        return {
+            "messages": [message],
+            "data": {**updated_data, "macro_analysis": message_content},
+            "metadata": state["metadata"],
+        }
+
     # 获取 end_date 并传递给 get_stock_news
     end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date
 
@@ -224,7 +257,7 @@ def macro_analyst_agent(state: AgentState):
     # logger.info(
     # f"--- DEBUG: macro_analyst_agent RETURN messages: {[msg.name for msg in (state['messages'] + [message])]} ---")
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": {
             **updated_data,
             "macro_analysis": message_content

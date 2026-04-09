@@ -1,4 +1,4 @@
-﻿import json
+import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as ConcurrentTimeoutError
 from typing import Any
 
@@ -220,9 +220,8 @@ Portfolio state:
 
     show_workflow_status(f"{agent_name}: completed", "completed")
 
-    final_messages_output = cleaned_messages_for_processing + [final_decision_message]
     return {
-        "messages": final_messages_output,
+        "messages": [final_decision_message],
         "data": state["data"],
         "metadata": {
             **state["metadata"],
