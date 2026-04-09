@@ -1,0 +1,6 @@
+﻿profile,remove_single_agent,homogeneous_agent_type,annualized_return,sharpe_ratio,max_drawdown,total_return,avg_response_time_sec,token_usage_total,trades_count,var_95
+full_heterogeneous,,,0.0,0.0,0.0,0.0,0.27953100000013364,0,0,0.0
+full_homogeneous,,llm,0.0,0.0,0.0,0.0,0.2838627000019187,0,0,0.0
+no_rule_agents,,,0.0,0.0,0.0,0.0,0.20379329999923357,0,0,0.0
+no_llm_agents,,,0.0,0.0,0.0,0.0,0.22735679999823333,0,0,0.0
+remove_single_agent_x,sentiment,,0.0,0.0,0.0,0.0,0.2297642999983509,0,0,0.0

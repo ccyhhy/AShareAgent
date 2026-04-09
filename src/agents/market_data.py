@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 import pandas as pd
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.api import (
     calculate_comprehensive_financial_metrics,
     get_financial_metrics,
@@ -42,6 +47,41 @@ def market_data_agent(state: AgentState):
     show_workflow_status("Market Data Agent")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="market_data",
+        agent_type="data_layer",
+        message_name="market_data_agent",
+        output_key="market_data",
+        payload_overrides={
+            "ticker": data.get("ticker") or data.get("stock_symbol"),
+            "start_date": data.get("start_date"),
+            "end_date": data.get("end_date"),
+            "data_collected": {
+                "price_history": False,
+                "financial_metrics": False,
+                "financial_statements": False,
+                "market_data": False,
+            },
+            "summary": "Ablation disabled market_data agent. Using empty deterministic payload.",
+        },
+    )
+    if ablation_result is not None:
+        payload = json.loads(ablation_result["messages"][0].content)
+        ablation_result["data"].update(
+            {
+                "prices": [],
+                "financial_metrics": [{}],
+                "financial_line_items": [{}],
+                "market_cap": 0,
+                "market_data": {"market_cap": 0},
+                "start_date": data.get("start_date"),
+                "end_date": data.get("end_date"),
+            }
+        )
+        ablation_result["data"]["agent_outputs"]["market_data"] = payload
+        return ablation_result
 
     current_date = datetime.now()
     yesterday = current_date - timedelta(days=1)

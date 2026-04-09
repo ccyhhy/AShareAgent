@@ -5,7 +5,12 @@ import akshare as ak
 from src.utils.logging_config import setup_logger
 # from langgraph.graph import AgentState # Changed import
 # Added for alignment
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from typing import Dict, Any, List
 from src.utils.api_utils import agent_endpoint  # Added for alignment
 from src.tools.openrouter_config import get_chat_completion
@@ -64,6 +69,38 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     # 改为按月缓存：使用年-月作为缓存键
     month_str = datetime.now().strftime("%Y-%m")
     output_file_path = os.path.join("data", "macro_summary.json")
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="macro_news_agent",
+        agent_type="llm",
+        message_name=agent_name,
+        output_key="macro_news_agent",
+        data_key="macro_news_analysis",
+        payload_overrides={
+            "analysis_domain": "macro_market_news",
+            "news_count": 0,
+            "summary": "Ablation disabled macro_news_agent. Market-wide news synthesis skipped.",
+            "loaded_from_cache": False,
+            "analysis_period": "monthly",
+            "summary_generated_on": month_str,
+            "backtest_mode": False,
+        },
+        data_updates={
+            "macro_news_analysis_result": "Ablation disabled macro_news_agent. Market-wide news synthesis skipped."
+        },
+    )
+    if ablation_result is not None:
+        ablation_result["metadata"][f"{agent_name}_details"] = {
+            "summary_generated_on": month_str,
+            "analysis_period": "monthly",
+            "news_count_for_summary": 0,
+            "llm_summary_preview": "Ablation disabled macro_news_agent.",
+            "loaded_from_cache": False,
+            "backtest_mode": False,
+            "ablation_disabled": True,
+        }
+        return ablation_result
 
     if _is_backtest_mode():
         summary = "Backtest mode active. Market-wide macro news crawling and LLM summary skipped."

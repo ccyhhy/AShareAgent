@@ -7,7 +7,12 @@ import numpy as np
 import pandas as pd
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.api import prices_to_df
 from src.utils.api_utils import agent_endpoint
 from src.utils.logging_config import setup_logger
@@ -54,6 +59,30 @@ def risk_management_agent(state: AgentState):
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
     portfolio = data.get("portfolio", {"cash": 0.0, "stock": 0.0})
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="risk_management",
+        agent_type="statistical_model",
+        message_name="risk_management_agent",
+        output_key="risk_manager",
+        data_key="risk_analysis",
+        payload_overrides={
+            "risk_score": 50.0,
+            "margin_of_safety_score": 50.0,
+            "max_position": 0.35,
+            "max_position_size": 0.0,
+            "trading_action": "hold",
+            "risk_metrics": {
+                "annualized_volatility": None,
+                "max_drawdown": None,
+                "value_at_risk_95": None,
+                "sharpe_ratio": None,
+            },
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
 
     prices_df = prices_to_df(data.get("prices", []))
     if "close" not in prices_df.columns:

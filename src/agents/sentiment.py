@@ -7,7 +7,12 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.news_crawler import get_news_sentiment, get_stock_news
 from src.utils.api_utils import agent_endpoint
 from src.utils.logging_config import setup_logger
@@ -54,6 +59,24 @@ def sentiment_agent(state: AgentState):
     logger.info("Analyzing sentiment for ticker: %s", symbol)
 
     num_of_news = data.get("num_of_news", 20)
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="sentiment",
+        agent_type="rule_engine",
+        message_name="sentiment_agent",
+        output_key="sentiment",
+        data_key="sentiment_analysis",
+        payload_overrides={
+            "analysis_domain": SENTIMENT_ANALYSIS_DOMAIN,
+            "analysis_metric": SENTIMENT_ANALYSIS_METRIC,
+            "sentiment_score": 0.0,
+            "news_count": 0,
+            "news_window_days": NEWS_LOOKBACK_DAYS,
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
 
     if _is_backtest_mode():
         message_content = _with_sentiment_semantics(

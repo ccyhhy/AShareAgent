@@ -100,14 +100,20 @@ class KnowledgeBase:
         stock_code: str,
         limit: int = 3,
         as_of_date: str | None = None,
+        include_payload: bool = True,
     ) -> list[dict[str, Any]]:
         normalized_code = _normalize_stock_code(stock_code)
         if not normalized_code:
             return []
 
         safe_limit = max(1, min(int(limit), 20))
-        query = """
-            SELECT id, stock_code, analysis_date, signal, confidence, summary, payload_json, run_id, created_at
+        select_cols = (
+            "id, stock_code, analysis_date, signal, confidence, summary, payload_json, run_id, created_at"
+            if include_payload
+            else "id, stock_code, analysis_date, signal, confidence, summary, run_id, created_at"
+        )
+        query = f"""
+            SELECT {select_cols}
             FROM fundamentals_memory
             WHERE stock_code = ?
         """
@@ -125,10 +131,11 @@ class KnowledgeBase:
             rows = conn.execute(query, params).fetchall()
             for row in rows:
                 payload = {}
-                try:
-                    payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
-                except json.JSONDecodeError:
-                    payload = {}
+                if include_payload:
+                    try:
+                        payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+                    except json.JSONDecodeError:
+                        payload = {}
 
                 refs.append(
                     {

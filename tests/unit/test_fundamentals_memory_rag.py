@@ -113,7 +113,13 @@ def test_fundamentals_agent_reports_longitudinal_memory_delta(monkeypatch):
     monkeypatch.setattr(fundamentals_module, "show_agent_reasoning", lambda *args, **kwargs: None)
 
     class FakeKnowledgeBase:
-        def retrieve_fundamentals_refs(self, stock_code: str, limit: int, as_of_date: str | None = None):
+        def retrieve_fundamentals_refs(
+            self,
+            stock_code: str,
+            limit: int,
+            as_of_date: str | None = None,
+            include_payload: bool = True,
+        ):
             return [
                 {
                     "analysis_date": "2026-03-31",

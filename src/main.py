@@ -34,6 +34,7 @@ from src.utils.llm_interaction_logger import (
     log_agent_execution,
     set_global_log_storage
 )
+from src.experiments.ablation import build_ablation_config
 from backend.dependencies import get_log_storage
 from backend.main import app as fastapi_app
 from src.utils.logging_config import setup_logger
@@ -62,7 +63,17 @@ logger = setup_logger('main_workflow')
 # --- Run the Hedge Fund Workflow ---
 
 
-def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, portfolio: dict, show_reasoning: bool = False, num_of_news: int = 5, show_summary: bool = False):
+def run_hedge_fund(
+    run_id: str,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    portfolio: dict,
+    show_reasoning: bool = False,
+    num_of_news: int = 5,
+    show_summary: bool = False,
+    ablation_config: dict | None = None,
+):
     print(f"--- Starting Workflow Run ID: {run_id} ---")
     try:
         from backend.state import api_state
@@ -84,6 +95,7 @@ def run_hedge_fund(run_id: str, ticker: str, start_date: str, end_date: str, por
             "show_reasoning": show_reasoning,
             "run_id": run_id,
             "show_summary": show_summary,
+            **({"ablation_config": ablation_config} if ablation_config else {}),
         }
     }
 
@@ -231,6 +243,27 @@ if __name__ == "__main__":
                         default=0, help='Initial stock position (default: 0)')
     parser.add_argument('--summary', action='store_true',
                         help='Show beautiful summary report at the end')
+    parser.add_argument(
+        "--ablation-profile",
+        type=str,
+        default="full_heterogeneous",
+        help=(
+            "Ablation profile: full_heterogeneous | full_homogeneous | "
+            "no_rule_agents | no_llm_agents | remove_single_agent_x"
+        ),
+    )
+    parser.add_argument(
+        "--ablation-agent",
+        type=str,
+        default=None,
+        help="Agent key for remove_single_agent_x (e.g. sentiment, fundamentals, macro_analyst).",
+    )
+    parser.add_argument(
+        "--ablation-homogeneous-type",
+        type=str,
+        default="llm",
+        help="Target agent type for full_homogeneous profile.",
+    )
     args = parser.parse_args()
     current_date = datetime.now()
     yesterday = current_date - timedelta(days=1)
@@ -246,6 +279,11 @@ if __name__ == "__main__":
         raise ValueError("Number of news articles must be at least 1")
     if args.num_of_news > 100:
         raise ValueError("Number of news articles cannot exceed 100")
+    ablation_config = build_ablation_config(
+        profile=args.ablation_profile,
+        remove_single_agent=args.ablation_agent,
+        homogeneous_agent_type=args.ablation_homogeneous_type,
+    )
     portfolio = {"cash": args.initial_capital, "stock": args.initial_position}
     main_run_id = str(uuid.uuid4())
     result = run_hedge_fund(
@@ -256,7 +294,8 @@ if __name__ == "__main__":
         portfolio=portfolio,
         show_reasoning=args.show_reasoning,
         num_of_news=args.num_of_news,
-        show_summary=args.summary
+        show_summary=args.summary,
+        ablation_config=ablation_config,
     )
     print("\nFinal Result:")
     print(result)

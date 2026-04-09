@@ -125,6 +125,47 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
     }
   };
 
+  const getAgentTypeMeta = (agentType: unknown): { label: string; tone: string } => {
+    const normalized = String(agentType || '').trim().toLowerCase();
+    const mapping: Record<string, { label: string; tone: string }> = {
+      rule_engine: { label: 'Rule Engine', tone: 'rule' },
+      quantitative_model: { label: 'Quant Model', tone: 'quant' },
+      statistical_model: { label: 'Stat Model', tone: 'stats' },
+      llm: { label: 'LLM', tone: 'llm' },
+      llm_rag: { label: 'LLM + RAG', tone: 'rag' },
+      hybrid_rule_llm: { label: 'Hybrid Rule + LLM', tone: 'hybrid' },
+    };
+    return mapping[normalized] || { label: normalized || 'untyped', tone: 'default' };
+  };
+
+  const getStructuredPreview = (payload: Record<string, any>): Array<{ key: string; value: string }> => {
+    const source =
+      payload.structured_data && typeof payload.structured_data === 'object' && !Array.isArray(payload.structured_data)
+        ? payload.structured_data
+        : payload;
+
+    const ignore = new Set([
+      'agent_name',
+      'agent_type',
+      'signal',
+      'confidence',
+      'summary',
+      'reasoning',
+      'structured_data',
+    ]);
+
+    return Object.entries(source)
+      .filter(([key, value]) => !ignore.has(key) && value != null)
+      .slice(0, 3)
+      .map(([key, value]) => ({
+        key,
+        value:
+          typeof value === 'object'
+            ? JSON.stringify(value).slice(0, 120)
+            : String(value).slice(0, 120),
+      }));
+  };
+
   return (
     <div style={{ padding: '24px 0' }}>
       {/* 鏍囬 */}
@@ -156,6 +197,58 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
           鍒嗘瀽鍖洪棿: {safeGet(agent_results, ['market_data', 'start_date']) || '2024-07-05'} 鑷?{safeGet(agent_results, ['market_data', 'end_date']) || '2025-07-05'}
         </div>
       </div>
+
+      {Object.keys(agent_results).length > 0 && (
+        <Card
+          title={<span>Heterogeneous Agent Output Matrix</span>}
+          style={{ marginBottom: '24px' }}
+          bordered
+        >
+          <Row gutter={[12, 12]}>
+            {Object.entries(agent_results).map(([agentKey, payload]) => {
+              const data = (payload || {}) as Record<string, any>;
+              const typeMeta = getAgentTypeMeta(data.agent_type);
+              const preview = getStructuredPreview(data);
+              return (
+                <Col xs={24} md={12} xl={8} key={agentKey}>
+                  <Card size="small">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <Text strong>{agentKey}</Text>
+                      <span className={`hetero-type-pill hetero-type-pill--${typeMeta.tone}`}>
+                        {typeMeta.label}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <Tag color={getSignalColor(data.signal)}>
+                        {String(data.signal || 'neutral').toUpperCase()}
+                      </Tag>
+                      <Tag color="blue">{formatConfidence(data.confidence)}</Tag>
+                    </div>
+                    {preview.length > 0 && (
+                      <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+                        {preview.map((item) => (
+                          <div
+                            key={`${agentKey}-${item.key}`}
+                            style={{
+                              padding: '6px 8px',
+                              borderRadius: 8,
+                              background: '#f5f8ff',
+                              border: '1px solid #dbe6ff',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11 }}>{item.key}</Text>
+                            <div style={{ fontSize: 12, marginTop: 2 }}>{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        </Card>
+      )}
 
       {/* Relative valuation (PB percentile) */}
       {agent_results.technicals && (

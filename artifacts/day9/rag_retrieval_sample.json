@@ -1,0 +1,51 @@
+{
+  "ticker": "600519",
+  "analysis_date": "2025-03-31",
+  "memory_scope": {
+    "mode": "sqlite_first",
+    "channel": "fundamentals_memory",
+    "stock_code": "600519",
+    "hard_filter": "stock_code_exact",
+    "limit": 3,
+    "retrieved_count": 3,
+    "status": "ok"
+  },
+  "memory_delta": {
+    "status": "ok",
+    "changed": false,
+    "change_type": "stable",
+    "previous_signal": "bearish",
+    "current_signal": "bearish",
+    "previous_confidence": "100%",
+    "current_confidence": "100%",
+    "confidence_delta_points": 0.0,
+    "latest_ref_date": "2025-03-31",
+    "summary": "Signal remained bearish versus latest memory (2025-03-31)."
+  },
+  "retrieved_refs_sample": [
+    {
+      "id": 116,
+      "stock_code": "600519",
+      "analysis_date": "2025-03-31",
+      "signal": "bearish",
+      "confidence": "100%",
+      "created_at": "2026-04-09T14:17:21.400858"
+    },
+    {
+      "id": 102,
+      "stock_code": "600519",
+      "analysis_date": "2025-03-31",
+      "signal": "bearish",
+      "confidence": "100%",
+      "created_at": "2026-04-09T14:12:47.972062"
+    },
+    {
+      "id": 85,
+      "stock_code": "600519",
+      "analysis_date": "2025-03-31",
+      "signal": "bearish",
+      "confidence": "100%",
+      "created_at": "2026-04-09T14:11:06.113533"
+    }
+  ]
+}

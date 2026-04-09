@@ -7,7 +7,12 @@ from typing import Any
 import pandas as pd
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.local_csv_provider import LocalCSVProvider
 from src.utils.api_utils import agent_endpoint
 from src.utils.logging_config import setup_logger
@@ -63,6 +68,24 @@ def technical_analyst_agent(state: AgentState):
     show_workflow_status("Technical Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="technical_analyst",
+        agent_type="rule_engine",
+        message_name="technical_analyst_agent",
+        output_key="technicals",
+        data_key="technical_analysis",
+        payload_overrides={
+            "analysis_domain": TECHNICALS_ANALYSIS_DOMAIN,
+            "analysis_metric": TECHNICALS_ANALYSIS_METRIC,
+        },
+    )
+    if ablation_result is not None:
+        payload = json.loads(ablation_result["messages"][0].content)
+        ablation_result["data"]["relative_valuation_analysis"] = payload
+        return ablation_result
+
     ticker = data.get("ticker") or data.get("stock_symbol")
 
     message_content: dict[str, Any]

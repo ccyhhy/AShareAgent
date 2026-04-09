@@ -744,6 +744,36 @@ body {
   font-size: 14px;
 }
 
+.agent-node-structured {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.agent-node-structured-item {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(241, 245, 253, 0.92);
+  box-shadow: inset 0 0 0 1px rgba(78, 103, 156, 0.08);
+}
+
+.agent-node-structured-key {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-500);
+}
+
+.agent-node-structured-value {
+  font-size: 12px;
+  color: var(--ink-700);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
 .agent-node-meta {
   display: flex;
   align-items: center;

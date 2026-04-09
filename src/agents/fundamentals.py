@@ -1,7 +1,12 @@
 from langchain_core.messages import HumanMessage
 from src.utils.logging_config import setup_logger
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
 import json
@@ -132,6 +137,28 @@ def _build_memory_delta(
     }
 
 
+def _sanitize_memory_refs(refs: Any, limit: int = FUNDAMENTALS_MEMORY_LIMIT) -> list[dict[str, Any]]:
+    if not isinstance(refs, list):
+        return []
+    sanitized: list[dict[str, Any]] = []
+    for ref in refs[:limit]:
+        if not isinstance(ref, dict):
+            continue
+        sanitized.append(
+            {
+                "id": ref.get("id"),
+                "stock_code": ref.get("stock_code"),
+                "analysis_date": ref.get("analysis_date"),
+                "signal": ref.get("signal"),
+                "confidence": ref.get("confidence"),
+                "summary": ref.get("summary"),
+                "run_id": ref.get("run_id"),
+                "created_at": ref.get("created_at"),
+            }
+        )
+    return sanitized
+
+
 ##### Fundamental Agent #####
 
 
@@ -141,6 +168,32 @@ def fundamentals_agent(state: AgentState):
     show_workflow_status("Fundamentals Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="fundamentals",
+        agent_type="rule_engine",
+        message_name="fundamentals_agent",
+        output_key="fundamentals",
+        data_key="fundamental_analysis",
+        payload_overrides={
+            "analysis_mode": "memory_enhanced_rule_engine",
+            "retrieved_refs": [],
+            "memory_scope": {
+                "mode": "sqlite_first",
+                "channel": "fundamentals_memory",
+                "status": "ablation_disabled",
+            },
+            "memory_delta": {
+                "status": "ablation_disabled",
+                "changed": False,
+                "summary": "Ablation disabled fundamentals agent.",
+            },
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
+
     stock_code = data.get("ticker") or data.get("stock_symbol")
     metrics = data["financial_metrics"][0]
 
@@ -154,7 +207,9 @@ def fundamentals_agent(state: AgentState):
                 stock_code=str(stock_code),
                 limit=FUNDAMENTALS_MEMORY_LIMIT,
                 as_of_date=data.get("end_date"),
+                include_payload=False,
             )
+            retrieved_refs = _sanitize_memory_refs(retrieved_refs)
             memory_scope["retrieved_count"] = len(retrieved_refs)
             memory_scope["status"] = "ok"
         except Exception as exc:
@@ -334,9 +389,11 @@ def fundamentals_agent(state: AgentState):
         try:
             if knowledge_base is None:
                 knowledge_base = _get_knowledge_base()
+            memory_payload = dict(message_content)
+            memory_payload["retrieved_refs"] = _sanitize_memory_refs(retrieved_refs)
             knowledge_base.save_fundamentals_memory(
                 stock_code=str(stock_code),
-                analysis_payload=message_content,
+                analysis_payload=memory_payload,
                 run_id=data.get("run_id"),
                 analysis_date=data.get("end_date"),
             )

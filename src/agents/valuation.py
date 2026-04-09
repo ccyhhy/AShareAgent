@@ -6,7 +6,12 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.utils.api_utils import agent_endpoint
 from src.utils.logging_config import setup_logger
 
@@ -117,6 +122,17 @@ def valuation_agent(state: AgentState):
     show_workflow_status("Valuation Agent")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="valuation",
+        agent_type="quantitative_model",
+        message_name="valuation_agent",
+        output_key="valuation",
+        data_key="valuation_analysis",
+    )
+    if ablation_result is not None:
+        return ablation_result
 
     financial_metrics = data.get("financial_metrics", [{}])
     line_items = data.get("financial_line_items", [{}, {}])

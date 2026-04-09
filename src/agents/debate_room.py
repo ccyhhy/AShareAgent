@@ -8,7 +8,12 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.openrouter_config import get_chat_completion
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
@@ -44,11 +49,78 @@ def _to_confidence(value: Any) -> float:
     return max(0.0, min(score, 1.0))
 
 
+def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
 @agent_endpoint("debate_room", "Debate room that balances bull and bear researcher views")
 def debate_room_agent(state: AgentState):
     """Facilitate structured bull-vs-bear debate and output a balanced signal."""
     show_workflow_status("Debate Room")
     show_reasoning = state["metadata"]["show_reasoning"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="debate_room",
+        agent_type="llm",
+        message_name="debate_room_agent",
+        output_key="debate_room",
+        data_key="debate_analysis",
+        payload_overrides={
+            "bull_confidence": 0.5,
+            "bear_confidence": 0.5,
+            "confidence_diff": 0.0,
+            "adjusted_confidence_diff": 0.0,
+            "llm_score": 0.0,
+            "llm_analysis": "Ablation disabled debate_room agent.",
+            "llm_reasoning": "Neutral deterministic fallback.",
+            "mixed_confidence_diff": 0.0,
+            "debate_summary": ["Ablation disabled debate room debate synthesis."],
+            "ashare_factors": {
+                "policy_sensitivity": False,
+                "liquidity_concerns": False,
+                "volatility_level": 0.0,
+                "adaptive_threshold": 0.1,
+                "adjustments_applied": {
+                    "policy_factor": 0.0,
+                    "liquidity_factor": 0.0,
+                    "volatility_factor": 0.0,
+                    "sentiment_extreme": 0.0,
+                },
+            },
+            "decision_quality": {
+                "consensus_strength": 1.0,
+                "argument_balance": 1.0,
+                "llm_agreement": 1.0,
+            },
+        },
+        data_updates={
+            "ashare_debate_metrics": {
+                "volatility_level": 0.0,
+                "policy_sensitivity": False,
+                "decision_confidence": 0.5,
+                "consensus_quality": 1.0,
+            }
+        },
+    )
+    if ablation_result is not None:
+        ablation_result["metadata"].update(
+            {
+                "debate_enhanced": True,
+                "adaptive_threshold": 0.1,
+                "special_conditions": {
+                    "policy_sensitive": False,
+                    "high_volatility": False,
+                    "extreme_sentiment": False,
+                    "liquidity_concern": False,
+                },
+            }
+        )
+        return ablation_result
 
     researcher_aliases = {
         "researcher_bull_agent": "researcher_bull",
@@ -197,6 +269,7 @@ def debate_room_agent(state: AgentState):
     llm_alignment = max(0.0, min(1.0, llm_alignment))
 
     message_content = {
+        "agent_type": "llm",
         "signal": final_signal,
         "confidence": confidence,
         "bull_confidence": bull_confidence,
@@ -233,11 +306,14 @@ def debate_room_agent(state: AgentState):
 
     state["metadata"]["agent_reasoning"] = message_content
     show_workflow_status("Debate Room", "completed")
+    updated_data = dict(state["data"])
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["debate_room"] = message_content
 
     return {
         "messages": [message],
         "data": {
-            **state["data"],
+            **updated_data,
             "debate_analysis": message_content,
             "ashare_debate_metrics": {
                 "volatility_level": market_volatility,

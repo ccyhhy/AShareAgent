@@ -1,7 +1,12 @@
 import os
 
 from langchain_core.messages import HumanMessage
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.news_crawler import get_stock_news
 from src.utils.logging_config import setup_logger
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
@@ -118,6 +123,24 @@ def macro_analyst_agent(state: AgentState):
     show_workflow_status("Macro Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="macro_analyst",
+        agent_type="llm",
+        message_name="macro_analyst_agent",
+        output_key="macro_analyst",
+        data_key="macro_analysis",
+        payload_overrides={
+            "analysis_domain": "macro_cycle_policy",
+            "macro_environment": "neutral",
+            "impact_on_stock": "neutral",
+            "key_factors": [],
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
+
     symbol = data["ticker"]
     logger.info(f"正在进行宏观分析: {symbol}")
 

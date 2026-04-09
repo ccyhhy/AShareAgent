@@ -3,8 +3,21 @@ import json
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.utils.api_utils import agent_endpoint
+
+
+def _ensure_agent_outputs(data: dict) -> dict:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
 
 
 @agent_endpoint(
@@ -15,6 +28,37 @@ def researcher_bear_agent(state: AgentState):
     """Analyze first-layer signals from a bearish perspective."""
     show_workflow_status("Bearish Researcher")
     show_reasoning = state["metadata"]["show_reasoning"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="researcher_bear",
+        agent_type="llm",
+        message_name="researcher_bear",
+        output_key="researcher_bear",
+        payload_overrides={
+            "perspective": "bearish",
+            "confidence": 0.5,
+            "thesis_points": ["Ablation disabled bearish researcher; neutral risk stance applied."],
+            "technical_signal_semantics": "relative_valuation_pb_percentile",
+            "sentiment_signal_semantics": "market_news_sentiment",
+            "risk_weights": {
+                "fundamental": 0.35,
+                "technical": 0.25,
+                "valuation": 0.25,
+                "sentiment": 0.15,
+            },
+            "risk_factors": [],
+            "risk_concentration": 0.0,
+            "ashare_risks": {
+                "limit_down_risk": False,
+                "policy_sensitivity": False,
+                "liquidity_crunch": False,
+                "margin_pressure": False,
+            },
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
 
     technical_message = next(
         (msg for msg in state["messages"] if msg.name == "technical_analyst_agent"), None
@@ -157,6 +201,7 @@ def researcher_bear_agent(state: AgentState):
     risk_logic = "; ".join(logic_parts) if logic_parts else "downside risks are still non-trivial"
 
     message_content = {
+        "agent_type": "llm",
         "perspective": "bearish",
         "confidence": avg_confidence,
         "thesis_points": bearish_points,
@@ -187,9 +232,12 @@ def researcher_bear_agent(state: AgentState):
 
     result_metadata = state["metadata"].copy()
     result_metadata["researcher_bear_reasoning"] = message_content
+    updated_data = dict(state["data"])
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["researcher_bear"] = message_content
 
     return {
         "messages": [message],
-        "data": state["data"],
+        "data": updated_data,
         "metadata": result_metadata,
     }

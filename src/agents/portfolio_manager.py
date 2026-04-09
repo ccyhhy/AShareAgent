@@ -5,7 +5,12 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    get_ablation_disable_reason,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.openrouter_config import get_chat_completion
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 from src.utils.logging_config import setup_logger
@@ -99,6 +104,35 @@ def portfolio_management_agent(state: AgentState):
     show_workflow_status(f"{agent_name}: executing")
     show_reasoning_flag = state["metadata"]["show_reasoning"]
     portfolio = state["data"].get("portfolio", {"cash": 0.0, "stock": 0})
+
+    ablation_reason = get_ablation_disable_reason(
+        state,
+        agent_key="portfolio_management",
+        agent_type="llm",
+    )
+    if ablation_reason is not None:
+        decision_json = _default_decision()
+        decision_json["reasoning"] = (
+            f"{ablation_reason} Final decision forced to deterministic hold."
+        )
+        final_decision_message = HumanMessage(
+            content=json.dumps(decision_json, ensure_ascii=False),
+            name=agent_name,
+        )
+        return {
+            "messages": [final_decision_message],
+            "data": state["data"],
+            "metadata": {
+                **state["metadata"],
+                f"{agent_name}_decision_details": {
+                    "action": decision_json.get("action"),
+                    "quantity": decision_json.get("quantity"),
+                    "confidence": decision_json.get("confidence"),
+                    "reasoning_snippet": str(decision_json.get("reasoning", ""))[:150] + "...",
+                },
+                "agent_reasoning": decision_json["reasoning"],
+            },
+        }
 
     unique_incoming_messages = {}
     for msg in state["messages"]:

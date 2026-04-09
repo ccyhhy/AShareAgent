@@ -54,6 +54,7 @@ class TestResearcherBullAgent:
         # 验证结果
         assert "messages" in result
         assert len(result["messages"]) == 1
+        assert result["data"]["agent_outputs"]["researcher_bull"]["perspective"] == "bullish"
         
         # 检查新消息
         new_message = result["messages"][0]
@@ -176,6 +177,7 @@ class TestResearcherBearAgent:
         state["messages"] = [technical_msg, fundamental_msg, sentiment_msg, valuation_msg]
         
         result = researcher_bear_agent(state)
+        assert result["data"]["agent_outputs"]["researcher_bear"]["perspective"] == "bearish"
         
         # 验证结果
         new_message = result["messages"][0]
