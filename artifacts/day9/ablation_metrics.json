@@ -1,0 +1,67 @@
+[
+  {
+    "profile": "full_heterogeneous",
+    "remove_single_agent": "",
+    "homogeneous_agent_type": "",
+    "annualized_return": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "total_return": 0.0,
+    "avg_response_time_sec": 0.27953100000013364,
+    "token_usage_total": 0,
+    "trades_count": 0,
+    "var_95": 0.0
+  },
+  {
+    "profile": "full_homogeneous",
+    "remove_single_agent": "",
+    "homogeneous_agent_type": "llm",
+    "annualized_return": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "total_return": 0.0,
+    "avg_response_time_sec": 0.2838627000019187,
+    "token_usage_total": 0,
+    "trades_count": 0,
+    "var_95": 0.0
+  },
+  {
+    "profile": "no_rule_agents",
+    "remove_single_agent": "",
+    "homogeneous_agent_type": "",
+    "annualized_return": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "total_return": 0.0,
+    "avg_response_time_sec": 0.20379329999923357,
+    "token_usage_total": 0,
+    "trades_count": 0,
+    "var_95": 0.0
+  },
+  {
+    "profile": "no_llm_agents",
+    "remove_single_agent": "",
+    "homogeneous_agent_type": "",
+    "annualized_return": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "total_return": 0.0,
+    "avg_response_time_sec": 0.22735679999823333,
+    "token_usage_total": 0,
+    "trades_count": 0,
+    "var_95": 0.0
+  },
+  {
+    "profile": "remove_single_agent_x",
+    "remove_single_agent": "sentiment",
+    "homogeneous_agent_type": "",
+    "annualized_return": 0.0,
+    "sharpe_ratio": 0.0,
+    "max_drawdown": 0.0,
+    "total_return": 0.0,
+    "avg_response_time_sec": 0.2297642999983509,
+    "token_usage_total": 0,
+    "trades_count": 0,
+    "var_95": 0.0
+  }
+]

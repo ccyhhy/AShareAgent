@@ -57,6 +57,7 @@ class TestDebateRoomAgent:
         assert new_message.name == "debate_room_agent"
         
         content = json.loads(new_message.content)
+        assert result["data"]["agent_outputs"]["debate_room"]["signal"] == content["signal"]
         assert "signal" in content
         assert "confidence" in content
         assert "reasoning" in content

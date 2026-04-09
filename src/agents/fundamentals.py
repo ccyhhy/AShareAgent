@@ -1,13 +1,163 @@
 from langchain_core.messages import HumanMessage
 from src.utils.logging_config import setup_logger
 
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
 import json
+from typing import Any
+
+from src.rag.knowledge_base import KnowledgeBase
 
 # 初始化 logger
 logger = setup_logger('fundamentals_agent')
+
+
+def _ensure_agent_outputs(data: dict) -> dict:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
+FUNDAMENTALS_MEMORY_LIMIT = 3
+
+
+def _get_knowledge_base() -> KnowledgeBase:
+    return KnowledgeBase()
+
+
+def _build_memory_scope(stock_code: str | None) -> dict[str, Any]:
+    normalized = str(stock_code or "").split(".")[0]
+    return {
+        "mode": "sqlite_first",
+        "channel": "fundamentals_memory",
+        "stock_code": normalized,
+        "hard_filter": "stock_code_exact",
+        "limit": FUNDAMENTALS_MEMORY_LIMIT,
+        "retrieved_count": 0,
+        "status": "not_attempted",
+    }
+
+
+def _normalize_signal(value: Any) -> str:
+    signal = str(value or "").strip().lower()
+    if signal in {"bullish", "bearish", "neutral"}:
+        return signal
+    return "unknown"
+
+
+def _parse_confidence_percent(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        score = float(value)
+        if 0 <= score <= 1:
+            score *= 100.0
+        return max(0.0, min(score, 100.0))
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("%"):
+        text = text[:-1].strip()
+    try:
+        score = float(text)
+    except ValueError:
+        return None
+    if 0 <= score <= 1:
+        score *= 100.0
+    return max(0.0, min(score, 100.0))
+
+
+def _build_memory_delta(
+    *,
+    current_signal: str,
+    current_confidence: str,
+    retrieved_refs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not retrieved_refs:
+        return {
+            "status": "no_history",
+            "changed": False,
+            "summary": "No prior fundamentals memory available for longitudinal comparison.",
+        }
+
+    latest_ref = retrieved_refs[0]
+    previous_signal = _normalize_signal(latest_ref.get("signal"))
+    previous_confidence = _parse_confidence_percent(latest_ref.get("confidence"))
+    current_conf = _parse_confidence_percent(current_confidence)
+
+    signal_changed = previous_signal != "unknown" and previous_signal != current_signal
+    confidence_delta = None
+    confidence_regime_changed = False
+    if previous_confidence is not None and current_conf is not None:
+        confidence_delta = round(current_conf - previous_confidence, 2)
+        confidence_regime_changed = abs(confidence_delta) >= 20.0
+
+    if signal_changed:
+        summary = (
+            f"Signal changed from {previous_signal} ({latest_ref.get('analysis_date', 'n/a')}) "
+            f"to {current_signal}."
+        )
+    elif confidence_regime_changed and confidence_delta is not None:
+        direction = "increased" if confidence_delta > 0 else "decreased"
+        summary = (
+            f"Signal stayed {current_signal}, confidence {direction} by {abs(confidence_delta):.2f} points "
+            f"vs {latest_ref.get('analysis_date', 'n/a')}."
+        )
+    else:
+        summary = (
+            f"Signal remained {current_signal} versus latest memory "
+            f"({latest_ref.get('analysis_date', 'n/a')})."
+        )
+
+    return {
+        "status": "ok",
+        "changed": signal_changed or confidence_regime_changed,
+        "change_type": (
+            "signal_reversal"
+            if signal_changed
+            else "confidence_shift"
+            if confidence_regime_changed
+            else "stable"
+        ),
+        "previous_signal": previous_signal,
+        "current_signal": current_signal,
+        "previous_confidence": latest_ref.get("confidence"),
+        "current_confidence": current_confidence,
+        "confidence_delta_points": confidence_delta,
+        "latest_ref_date": latest_ref.get("analysis_date"),
+        "summary": summary,
+    }
+
+
+def _sanitize_memory_refs(refs: Any, limit: int = FUNDAMENTALS_MEMORY_LIMIT) -> list[dict[str, Any]]:
+    if not isinstance(refs, list):
+        return []
+    sanitized: list[dict[str, Any]] = []
+    for ref in refs[:limit]:
+        if not isinstance(ref, dict):
+            continue
+        sanitized.append(
+            {
+                "id": ref.get("id"),
+                "stock_code": ref.get("stock_code"),
+                "analysis_date": ref.get("analysis_date"),
+                "signal": ref.get("signal"),
+                "confidence": ref.get("confidence"),
+                "summary": ref.get("summary"),
+                "run_id": ref.get("run_id"),
+                "created_at": ref.get("created_at"),
+            }
+        )
+    return sanitized
+
 
 ##### Fundamental Agent #####
 
@@ -18,7 +168,56 @@ def fundamentals_agent(state: AgentState):
     show_workflow_status("Fundamentals Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="fundamentals",
+        agent_type="rule_engine",
+        message_name="fundamentals_agent",
+        output_key="fundamentals",
+        data_key="fundamental_analysis",
+        payload_overrides={
+            "analysis_mode": "memory_enhanced_rule_engine",
+            "retrieved_refs": [],
+            "memory_scope": {
+                "mode": "sqlite_first",
+                "channel": "fundamentals_memory",
+                "status": "ablation_disabled",
+            },
+            "memory_delta": {
+                "status": "ablation_disabled",
+                "changed": False,
+                "summary": "Ablation disabled fundamentals agent.",
+            },
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
+
+    stock_code = data.get("ticker") or data.get("stock_symbol")
     metrics = data["financial_metrics"][0]
+
+    retrieved_refs: list[dict[str, Any]] = []
+    memory_scope = _build_memory_scope(stock_code)
+    knowledge_base: KnowledgeBase | None = None
+    if stock_code:
+        try:
+            knowledge_base = _get_knowledge_base()
+            retrieved_refs = knowledge_base.retrieve_fundamentals_refs(
+                stock_code=str(stock_code),
+                limit=FUNDAMENTALS_MEMORY_LIMIT,
+                as_of_date=data.get("end_date"),
+                include_payload=False,
+            )
+            retrieved_refs = _sanitize_memory_refs(retrieved_refs)
+            memory_scope["retrieved_count"] = len(retrieved_refs)
+            memory_scope["status"] = "ok"
+        except Exception as exc:
+            logger.warning("Fundamentals memory retrieval unavailable: %s", exc)
+            memory_scope["status"] = "unavailable"
+            memory_scope["error"] = str(exc)
+    else:
+        memory_scope["status"] = "no_stock_code"
 
     # Initialize signals list for different fundamental aspects
     signals = []
@@ -150,11 +349,23 @@ def fundamentals_agent(state: AgentState):
     # Calculate confidence level
     total_signals = len(signals)
     confidence = max(bullish_signals, bearish_signals) / total_signals
+    confidence_text = f"{round(confidence * 100)}%"
+    memory_delta = _build_memory_delta(
+        current_signal=overall_signal,
+        current_confidence=confidence_text,
+        retrieved_refs=retrieved_refs,
+    )
+    reasoning["memory_comparison"] = memory_delta["summary"]
 
     message_content = {
+        "agent_type": "rule_engine",
+        "analysis_mode": "memory_enhanced_rule_engine",
         "signal": overall_signal,
-        "confidence": f"{round(confidence * 100)}%",
-        "reasoning": reasoning
+        "confidence": confidence_text,
+        "reasoning": reasoning,
+        "retrieved_refs": retrieved_refs,
+        "memory_scope": memory_scope,
+        "memory_delta": memory_delta,
     }
 
     # Create the fundamental analysis message
@@ -168,15 +379,31 @@ def fundamentals_agent(state: AgentState):
         show_agent_reasoning(message_content, "Fundamental Analysis Agent")
     
     # 始终保存推理信息到metadata供API使用
+    updated_data = dict(data)
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["fundamentals"] = message_content
+    updated_data["fundamental_analysis"] = message_content
     state["metadata"]["agent_reasoning"] = message_content
+
+    if stock_code:
+        try:
+            if knowledge_base is None:
+                knowledge_base = _get_knowledge_base()
+            memory_payload = dict(message_content)
+            memory_payload["retrieved_refs"] = _sanitize_memory_refs(retrieved_refs)
+            knowledge_base.save_fundamentals_memory(
+                stock_code=str(stock_code),
+                analysis_payload=memory_payload,
+                run_id=data.get("run_id"),
+                analysis_date=data.get("end_date"),
+            )
+        except Exception as exc:
+            logger.warning("Fundamentals memory save skipped: %s", exc)
 
     show_workflow_status("Fundamentals Analyst", "completed")
     # logger.info(f"--- DEBUG: fundamentals_agent RETURN messages: {[msg.name for msg in [message]]} ---")
     return {
         "messages": [message],
-        "data": {
-            **data,
-            "fundamental_analysis": message_content
-        },
+        "data": updated_data,
         "metadata": state["metadata"],
     }

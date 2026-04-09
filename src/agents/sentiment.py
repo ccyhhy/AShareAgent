@@ -1,91 +1,182 @@
-from langchain_core.messages import HumanMessage
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
-from src.tools.news_crawler import get_stock_news, get_news_sentiment
-from src.utils.logging_config import setup_logger
-from src.utils.api_utils import agent_endpoint, log_llm_interaction
-from src.tools.openrouter_config import get_chat_completion
+﻿from __future__ import annotations
+
 import json
+import os
 from datetime import datetime, timedelta
+from typing import Any
 
-# 设置日志记录
-logger = setup_logger('sentiment_agent')
+from langchain_core.messages import HumanMessage
+
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
+from src.tools.news_crawler import get_news_sentiment, get_stock_news
+from src.utils.api_utils import agent_endpoint
+from src.utils.logging_config import setup_logger
+
+logger = setup_logger("sentiment_agent")
+
+SENTIMENT_ANALYSIS_DOMAIN = "market_sentiment"
+SENTIMENT_ANALYSIS_METRIC = "news_sentiment_score_7d"
+NEWS_LOOKBACK_DAYS = 7
 
 
-@agent_endpoint("sentiment", "情感分析师，分析市场新闻和社交媒体情绪")
+def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
+def _with_sentiment_semantics(payload: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(payload)
+    enriched.setdefault("analysis_domain", SENTIMENT_ANALYSIS_DOMAIN)
+    enriched.setdefault("analysis_metric", SENTIMENT_ANALYSIS_METRIC)
+    return enriched
+
+
+def _is_backtest_mode() -> bool:
+    value = os.getenv("ASHAREAGENT_BACKTEST_MODE")
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+@agent_endpoint(
+    "sentiment",
+    "Market sentiment analyst (rule engine), evaluates recent news sentiment.",
+)
 def sentiment_agent(state: AgentState):
-    """Responsible for sentiment analysis"""
+    """Analyze market sentiment from recent news and expose standardized outputs."""
     show_workflow_status("Sentiment Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
     symbol = data["ticker"]
-    logger.info(f"正在分析股票: {symbol}")
-    # 从命令行参数获取新闻数量，默认为20条
+    logger.info("Analyzing sentiment for ticker: %s", symbol)
+
     num_of_news = data.get("num_of_news", 20)
 
-    # 获取 end_date 并传递给 get_stock_news
-    end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="sentiment",
+        agent_type="rule_engine",
+        message_name="sentiment_agent",
+        output_key="sentiment",
+        data_key="sentiment_analysis",
+        payload_overrides={
+            "analysis_domain": SENTIMENT_ANALYSIS_DOMAIN,
+            "analysis_metric": SENTIMENT_ANALYSIS_METRIC,
+            "sentiment_score": 0.0,
+            "news_count": 0,
+            "news_window_days": NEWS_LOOKBACK_DAYS,
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
 
-    # 获取新闻数据并分析情感，添加 date 参数
-    news_list = get_stock_news(symbol, max_news=num_of_news, date=end_date)
+    if _is_backtest_mode():
+        message_content = _with_sentiment_semantics(
+            {
+                "agent_type": "rule_engine",
+                "signal": "neutral",
+                "confidence": "50%",
+                "reasoning": (
+                    "Backtest mode active. Remote news crawling and sentiment model calls skipped."
+                ),
+                "sentiment_score": 0.0,
+                "news_count": 0,
+                "news_window_days": NEWS_LOOKBACK_DAYS,
+            }
+        )
 
-    # 过滤7天内的新闻（只对有publish_time字段的新闻进行过滤）
-    cutoff_date = datetime.now() - timedelta(days=7)
-    recent_news = []
+        if show_reasoning:
+            show_agent_reasoning(message_content, "Market Sentiment Analysis Agent")
+
+        updated_data = dict(data)
+        agent_outputs = _ensure_agent_outputs(updated_data)
+        agent_outputs["sentiment"] = message_content
+        state["metadata"]["agent_reasoning"] = message_content
+
+        message = HumanMessage(
+            content=json.dumps(message_content, ensure_ascii=False),
+            name="sentiment_agent",
+        )
+
+        show_workflow_status("Sentiment Analyst", "completed")
+        return {
+            "messages": [message],
+            "data": {
+                **updated_data,
+                "sentiment_analysis": message_content,
+            },
+            "metadata": state["metadata"],
+        }
+
+    end_date = data.get("end_date")
+    news_list = get_stock_news(symbol, max_news=num_of_news, date=end_date) or []
+
+    cutoff_date = datetime.now() - timedelta(days=NEWS_LOOKBACK_DAYS)
+    recent_news: list[dict[str, Any]] = []
     for news in news_list:
-        if 'publish_time' in news:
-            try:
-                news_date = datetime.strptime(
-                    news['publish_time'], '%Y-%m-%d %H:%M:%S')
-                if news_date > cutoff_date:
-                    recent_news.append(news)
-            except ValueError:
-                # 如果时间格式无法解析，默认包含这条新闻
+        if "publish_time" not in news:
+            recent_news.append(news)
+            continue
+        try:
+            news_date = datetime.strptime(news["publish_time"], "%Y-%m-%d %H:%M:%S")
+            if news_date > cutoff_date:
                 recent_news.append(news)
-        else:
-            # 如果没有publish_time字段，默认包含这条新闻
+        except ValueError:
             recent_news.append(news)
 
     sentiment_score = get_news_sentiment(recent_news, num_of_news=num_of_news)
 
-    # 根据情感分数生成交易信号和置信度
     if sentiment_score >= 0.5:
         signal = "bullish"
-        confidence = str(round(abs(sentiment_score) * 100)) + "%"
+        confidence = f"{round(abs(sentiment_score) * 100)}%"
     elif sentiment_score <= -0.5:
         signal = "bearish"
-        confidence = str(round(abs(sentiment_score) * 100)) + "%"
+        confidence = f"{round(abs(sentiment_score) * 100)}%"
     else:
         signal = "neutral"
-        confidence = str(round((1 - abs(sentiment_score)) * 100)) + "%"
+        confidence = f"{round((1 - abs(sentiment_score)) * 100)}%"
 
-    # 生成分析结果
     message_content = {
+        "agent_type": "rule_engine",
         "signal": signal,
         "confidence": confidence,
-        "reasoning": f"Based on {len(recent_news)} recent news articles, sentiment score: {sentiment_score:.2f}"
+        "reasoning": (
+            f"Market sentiment from {len(recent_news)} recent news articles; "
+            f"sentiment_score={sentiment_score:.2f}."
+        ),
+        "sentiment_score": round(sentiment_score, 4),
+        "news_count": len(recent_news),
+        "news_window_days": NEWS_LOOKBACK_DAYS,
     }
+    message_content = _with_sentiment_semantics(message_content)
 
-    # 如果需要显示推理过程
     if show_reasoning:
-        show_agent_reasoning(message_content, "Sentiment Analysis Agent")
-    
-    # 始终保存推理信息到metadata供API使用
+        show_agent_reasoning(message_content, "Market Sentiment Analysis Agent")
+
+    updated_data = dict(data)
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["sentiment"] = message_content
     state["metadata"]["agent_reasoning"] = message_content
 
-    # 创建消息
     message = HumanMessage(
-        content=json.dumps(message_content),
+        content=json.dumps(message_content, ensure_ascii=False),
         name="sentiment_agent",
     )
 
     show_workflow_status("Sentiment Analyst", "completed")
-    # logger.info(
-    # f"--- DEBUG: sentiment_agent RETURN messages: {[msg.name for msg in [message]]} ---")
     return {
         "messages": [message],
         "data": {
-            **data,
-            "sentiment_analysis": sentiment_score
+            **updated_data,
+            "sentiment_analysis": message_content,
         },
         "metadata": state["metadata"],
     }

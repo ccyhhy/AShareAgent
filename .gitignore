@@ -150,3 +150,10 @@ coverage.xml
 # Temporary files
 *.tmp
 *.temp
+
+# Local datasets and workbench artifacts
+data/
+.superpowers/
+stitch/
+meeting_implementation_qa.md
+weekly_meeting_report.md

@@ -35,7 +35,7 @@ def main():
     # 配置细粒度agent频率
     agent_frequencies = {
         'market_data': 'daily',       # 市场数据每日更新
-        'technical': 'daily',         # 技术分析每日更新  
+        'technical': 'daily',         # 相对估值(PB百分位)每日更新（兼容 technical 键）
         'fundamentals': 'weekly',     # 基本面分析每周更新
         'sentiment': 'daily',         # 情绪分析每日更新
         'valuation': 'monthly',       # 估值分析每月更新

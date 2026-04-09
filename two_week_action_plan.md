@@ -1,629 +1,839 @@
-# 14天毕设冲刺指南（最终版 v6）
+﻿# 毕业设计执行指南（项目对齐与审计友好版 v4）
 
-> 基于 AShareAgent + CS视角创新 + 多维度评价体系 + Codex辅助
-
----
-
-## 一、项目定位
-
-- **Clone**: https://github.com/1517005260/AShareAgent
-- **你的数据**: `E:\codework\A股测试\data\`（60MB全A股离线数据）
-- **LLM**: DeepSeek API
-- **定位**: 计算机专业毕设，创新点重点放在系统架构、协议设计、RAG与实验方法，不把论文重心放在金融理论堆砌上
+> 更新日期：2026-04-08  
+> 适用仓库：`AShareAgent` 当前工作区  
+> 本文用途：作为后续开发、论文撰写、联调验证和 Git 管理的统一执行标准  
+> 本版本替代旧版“14 天冲刺清单式指南”，改为“工程规范 + 阶段路线图 + 审计友好口径”
+> v4 重点修正：先做协议与命名收敛，再做 Agent 语义收敛，最后再上 RAG
 
 ---
 
-## 二、三个创新点（CS专业版）
+## 1. 项目定位
 
-| # | 创新点 | 一句话说明 |
-|:---|:---|:---|
-| 1 | **异构多智能体架构** | 在 LangGraph 工作流中融合规则引擎、量化模型、统计方法和 LLM 增强分析 |
-| 2 | **RAG检索增强** | 引入 ChromaDB 向量数据库，让护城河Agent具备历史分析检索与复用能力 |
-| 3 | **多维度消融实验** | 不只比收益率，还系统比较成本、响应、鲁棒性和可解释性 |
-
----
-
-## 三、与 AShareAgent 实际结构对齐
-
-> [!IMPORTANT]
-> 以下内容已经按 `AShareAgent` 真实仓库结构修正。后续实施时，均以这里的真实文件名和目录为准。
-
-- 真实存在的分析Agent文件是：
-  - `src/agents/technicals.py`
-  - `src/agents/valuation.py`
-  - `src/agents/fundamentals.py`
-  - `src/agents/sentiment.py`
-  - `src/agents/macro_analyst.py`
-  - `src/agents/risk_manager.py`
-- 原仓库还有：
-  - `src/agents/market_data.py`
-  - `src/agents/macro_news_agent.py`
-  - `src/agents/debate_room.py`
-  - `src/agents/researcher_bull.py`
-  - `src/agents/researcher_bear.py`
-  - `src/agents/portfolio_manager.py`
-- 本地离线数据统一放在仓库顶层 `data/`
-- `LangGraph` 中的Agent返回值不能直接改成只返回 Pydantic 对象，外层必须继续保持原项目的 state dict 结构
+- 课题名称：基于异构多智能体的 A 股价值投资分析系统
+- 项目性质：计算机专业毕业设计，重点不在金融策略炫技，而在系统架构、协议设计、检索增强、实验方法与工程可复现性
+- 核心贡献应聚焦于以下 3 点：
+  1. 异构多智能体架构：规则、量化、统计、LLM 协同工作，而不是“全员调用大模型”
+  2. 检索增强证据层：为主观分析型 Agent 提供可追溯的历史证据与记忆上下文
+  3. 多维度消融评估：不仅比较收益，也比较延迟、成本、鲁棒性与可解释性
 
 ---
 
-## 四、文件改动总表
+## 2. 截至 2026-04-08 的真实项目状态
 
-```text
-重点重写Agent（6个）：
-  src/agents/technicals.py       → 估值分析Agent         (rule_engine)
-  src/agents/valuation.py        → DCF估值Agent          (quantitative_model)
-  src/agents/risk_manager.py     → 安全边际/风险Agent     (statistical_model)
-  src/agents/fundamentals.py     → 护城河+RAG Agent       (llm_rag)
-  src/agents/sentiment.py        → 财报质量Agent          (hybrid_rule_llm)
-  src/agents/macro_analyst.py    → 行业周期Agent          (llm)
+### 2.1 已完成
 
-改Prompt（3个）：
-  src/agents/researcher_bull.py   → 价值投资多头视角
-  src/agents/researcher_bear.py   → 价值投资空头视角
-  src/agents/portfolio_manager.py → 价值投资决策框架
+- 已接入本地 CSV 适配层：`src/tools/local_csv_provider.py`
+- 已完成 `api.py` 的本地优先改造，支持回测禁远程：`src/tools/api.py`
+- 已完成 3 个非 LLM Agent 的异构重写：
+  - `src/agents/technicals.py` -> `rule_engine`
+  - `src/agents/valuation.py` -> `quantitative_model`
+  - `src/agents/risk_manager.py` -> `statistical_model`
+- 已完成 `market_data.py` 的 local-first 和 backtest-safe 改造：`src/agents/market_data.py`
+- `tests/unit` 当前验证结果：`121 passed`
 
-新增模块（4个）：
-  src/rag/knowledge_base.py       → RAG知识库（ChromaDB）
-  src/common/protocol.py          → 统一通信协议（AgentMessage）
-  src/experiments/ablation.py     → 消融实验框架
-  src/tools/local_csv_provider.py → 本地CSV数据适配层
+### 2.2 尚未完成
 
-重点修改（4个）：
-  src/tools/api.py                → 优先走本地CSV，回测时禁外网
-  src/agents/market_data.py       → 接入本地CSV数据入口
-  frontend/src/components/AnalysisStatus.tsx → 展示异构Agent输出与性能
-  frontend/src/services/api.ts    → 增加AgentMessage与性能字段类型
+- `fundamentals.py` 仍是旧版规则式基本面分析，尚未升级为“护城河 + 证据检索”Agent
+- `sentiment.py` 仍是旧版新闻情绪分析，尚未升级为“财报质量/红旗 + 文本解释”混合 Agent
+- `macro_analyst.py` 仍是旧版宏观/新闻分析，尚未升级为“行业周期 + 政策敏感度”Agent
+- 统一输出协议仍未正式落地，后端和前端还在兼容多种旧返回形态
+- Agent 命名、字段命名、语义边界尚未完全收敛，存在“名字和真实职责不一致”的问题
+- 前端对异构 Agent 的展示还未完全按新结构对齐
+- 消融实验框架未实现
 
-保留但配合使用：
-  src/agents/macro_news_agent.py  → 宏观新闻补充
-  src/agents/debate_room.py       → 辩论室
-  src/backtesting/                → 原有回测系统直接复用
-  backend/                        → FastAPI后端
-  frontend/                       → React前端
+### 2.3 当前真实工作流
+
+```mermaid
+graph TD
+    A["market_data_agent"] --> B["technical_analyst_agent"]
+    A --> C["fundamentals_agent"]
+    A --> D["sentiment_agent"]
+    A --> E["valuation_agent"]
+    A --> F["macro_news_agent"]
+
+    B --> G["researcher_bull"]
+    C --> G
+    D --> G
+    E --> G
+
+    B --> H["researcher_bear"]
+    C --> H
+    D --> H
+    E --> H
+
+    G --> I["debate_room_agent"]
+    H --> I
+    I --> J["risk_management_agent"]
+    J --> K["macro_analyst_agent"]
+
+    K --> L["portfolio_management_agent"]
+    F --> L
 ```
+
+说明：
+
+- `market_data_agent` 是上游数据入口
+- `technicals / fundamentals / sentiment / valuation` 是第一层分析节点
+- `researcher_bull / researcher_bear / debate_room` 负责观点对抗与汇总
+- `risk_management_agent` 与 `macro_analyst_agent` 在决策后段继续补充约束与环境判断
+- `portfolio_management_agent` 是最终聚合节点
 
 ---
 
-## 五、14天日程
+## 3. 仓库真相与边界条件
 
-### Day 1：环境搭建 + 跑通基线
+以下内容必须以当前仓库真实结构为准，而不是以旧版计划中的理想结构为准。
 
-```powershell
-cd E:\codework
-git clone https://github.com/1517005260/AShareAgent.git
-cd AShareAgent
+### 3.1 实际存在的核心 Agent 文件
 
-poetry install
-cd frontend
-npm install
-cd ..
+- `src/agents/market_data.py`
+- `src/agents/technicals.py`
+- `src/agents/fundamentals.py`
+- `src/agents/sentiment.py`
+- `src/agents/valuation.py`
+- `src/agents/researcher_bull.py`
+- `src/agents/researcher_bear.py`
+- `src/agents/debate_room.py`
+- `src/agents/risk_manager.py`
+- `src/agents/macro_analyst.py`
+- `src/agents/macro_news_agent.py`
+- `src/agents/portfolio_manager.py`
 
-copy .env.example .env
-# 编辑 .env 填入 DeepSeek API Key
+### 3.2 当前数据层真相
 
-if (!(Test-Path data)) { New-Item -ItemType Directory -Path data | Out-Null }
-copy E:\codework\A股测试\data\*.csv data\
+- 本地离线数据统一放在仓库根目录 `data/`
+- 价格、PB、上市信息、交易日历已经有本地 CSV 入口
+- 新闻、宏观、部分财务数据仍可能依赖远程接口或本地 SQLite 缓存
+- 项目已有 SQLite 数据库能力，默认数据库文件位于 `data/ashare_agent.db`
 
-poetry run python -m src.main --ticker 600519 --show-reasoning
-```
+### 3.3 当前依赖真相
 
-**Day 1 目标：**
-- 先确认原项目在你的机器上能跑
-- 记录 Python / Poetry / Node / npm 版本
-- 截图原始系统运行结果，后续论文里做“改造前 vs 改造后”对比
-
-**论文素材：**
-- 运行环境表
-- 原项目分析结果截图
-- 前端初始界面截图
-
----
-
-### Day 2-3：先接本地CSV，再重写3个非LLM Agent
-
-> [!IMPORTANT]
-> 这两天不要先改 Prompt。先把“离线数据入口”打通，否则后续所有异构Agent都还会偷偷走原始外部 API。
-
-#### 第一步：创建本地CSV适配层
-
-给 Codex：
-
-```text
-创建 src/tools/local_csv_provider.py，作为 AShareAgent 的离线数据适配层。
-
-要求：
-1. 所有数据默认从 data/ 目录读取
-2. 统一提供以下能力：
-   - get_price_history(symbol, start_date, end_date)
-   - get_pb_history(symbol, start_date=None, end_date=None)
-   - get_listing_info(symbol)
-   - get_trading_calendar(start_date=None, end_date=None)
-3. 自动做列名标准化、日期过滤、股票代码格式统一
-4. 对缺失数据返回空DataFrame或None，不直接抛未处理异常
-5. 给读取结果加基础缓存，避免回测时重复读盘
-```
-
-#### 第二步：修改 `src/tools/api.py`
-
-给 Codex：
-
-```text
-修改 src/tools/api.py，使其在 AShareAgent 中优先走本地CSV数据。
-
-要求：
-1. get_price_history 优先调用 local_csv_provider
-2. 回测模式下禁止外部网络请求
-3. 如果本地数据不存在，再按显式开关决定是否允许回退到原API
-4. 保持原函数签名不变，避免影响已有调用链
-5. 在日志中明确记录“本次数据来自本地CSV还是远程API”
-```
-
-#### Agent 1：估值分析Agent（替换 `src/agents/technicals.py`）
-
-给 Codex：
-
-```text
-重写 src/agents/technicals.py 为估值分析Agent。
-
-要求：
-1. 不用LLM，agent_type="rule_engine"
-2. 从 data/pb.csv 读取PB历史，计算近5年PB百分位
-3. PB百分位评分：
-   - <20% → 90分
-   - <40% → 70分
-   - <60% → 50分
-   - >60% → 30分
-   - >80% → 10分
-4. 保持 technical_analyst_agent 函数签名不变
-5. 外层仍返回原项目 LangGraph state dict
-6. 标准化结果写入 state["data"]["agent_outputs"]["technicals"]
-7. 代码顶部注明“规则引擎型异构Agent”
-```
-
-#### Agent 2：DCF估值Agent（替换 `src/agents/valuation.py`）
-
-给 Codex：
-
-```text
-重写 src/agents/valuation.py 为DCF自由现金流折现Agent。
-
-要求：
-1. 不用LLM，agent_type="quantitative_model"
-2. 两阶段DCF：
-   - 第一阶段5年增长期，增长率=历史复合增长率，上限20%
-   - 第二阶段永续增长率3%
-   - 折现率10%
-3. 输出内在价值、安全边际、安全边际评分
-4. 保持 valuation_agent 函数签名与 LangGraph state 返回结构不变
-5. 标准化结果写入 state["data"]["agent_outputs"]["valuation"]
-6. 数学计算过程写清注释，论文第4章可直接引用
-```
-
-#### Agent 3：安全边际/风险Agent（替换 `src/agents/risk_manager.py`）
-
-给 Codex：
-
-```text
-重写 src/agents/risk_manager.py 为安全边际/风险评估Agent。
-
-要求：
-1. 不用LLM，agent_type="statistical_model"
-2. 从价格历史中计算：
-   - 年化波动率
-   - 最大回撤
-   - VaR(95%)
-   - 夏普比率
-3. 根据风险水平输出：
-   - risk_score
-   - margin_of_safety_score
-   - max_position 建议
-4. 保持 risk_management_agent 函数签名不变
-5. 外层继续返回原项目 state dict
-6. 标准化结果写入 state["data"]["agent_outputs"]["risk_manager"]
-7. 可参考 E:\codework\A股测试\src\core\stats.py 的统计方法
-```
-
-**论文素材：**
-- 本地CSV适配层代码截图
-- 3个非LLM Agent代码截图
-- “不调用LLM”的证明截图
-- 运行耗时记录
+- 已有：`langgraph`、`langchain`、`akshare`、`yfinance`、`openai` 等
+- 尚无：`chromadb`、`sentence-transformers`、`faiss`
+- 因此后续 RAG 设计不得假设“向量库已经存在”
 
 ---
 
-### Day 4-5：重写3个LLM Agent + 接入RAG + 改3个Prompt
+## 4. 不可破坏的硬约束
 
-#### Agent 4：护城河+RAG Agent（替换 `src/agents/fundamentals.py`）
+后续所有改造都必须遵守以下约束。
 
-**这是创新点2的核心。**
+### 4.1 LangGraph 外层返回结构不变
 
-给 Codex：
+每个节点仍然必须返回：
 
-```text
-重写 src/agents/fundamentals.py 为护城河+RAG Agent。
-
-要求：
-1. agent_type="llm_rag"
-2. 分析前先查 ChromaDB：
-   - search_by_stock(stock_code, top_k=5)
-   - search_by_industry(industry, top_k=3)
-3. 把检索到的历史分析拼进Prompt，再调用DeepSeek
-4. 输出维度：
-   - 品牌壁垒
-   - 成本优势
-   - 转换成本
-   - 网络效应
-   - 政策壁垒
-5. 输出JSON：
-   {"moat_rating":"wide/narrow/none","score":0-100,"analysis":"...","retrieved_refs":[...]}
-6. 分析完成后自动把结果写回知识库
-7. JSON解析必须 try-except + 3次重试 + 默认兜底
-8. 回测时按季度频率运行
-9. 保持 fundamentals_agent 函数签名与 LangGraph state 返回结构不变
-10. 标准化结果写入 state["data"]["agent_outputs"]["fundamentals"]
+```python
+{
+    "messages": ...,
+    "data": ...,
+    "metadata": ...,
+}
 ```
 
-#### 同时创建 `src/rag/knowledge_base.py`
+不得将 LangGraph 节点直接改为只返回单一 Pydantic 对象。
 
-给 Codex：
+### 4.2 local-first 是基础原则
 
-```text
-创建 src/rag/knowledge_base.py，实现 ChromaDB 知识库封装。
+- 价格链路默认优先走本地 CSV
+- 回测模式下禁止远程价格接口
+- 回测模式下新增的 RAG 也必须支持本地运行与可重复执行
 
-要求：
-1. 使用 ChromaDB 本地持久化
-2. 提供：
-   - add_analysis(stock_code, analysis_text, metadata)
-   - search_similar(query, top_k=3)
-   - search_by_stock(stock_code, top_k=5)
-   - search_by_industry(industry, top_k=3)
-3. Embedding 使用 sentence-transformers 中文模型
-4. 失败时优雅降级，不能因为知识库异常导致主流程崩掉
-```
+### 4.3 RAG 不能成为单点故障
 
-#### Agent 5：财报质量Agent（替换 `src/agents/sentiment.py`）
+- 知识库不可用时，Agent 仍需给出合法输出
+- 检索失败时要走降级路径，不允许拖垮主流程
+- 不允许因为向量检索异常导致整个工作流中断
+- 不允许因为语义相似而跨股票代码误召回历史分析
 
-给 Codex：
+### 4.4 `agent_outputs` 是标准化输出层，不替代主流程通信
 
-```text
-重写 src/agents/sentiment.py 为财报质量Agent。
+- 决策主链当前主要消费 `messages` 与 `data`
+- `agent_outputs` 的作用是：
+  - 为前端提供统一展示结构
+  - 为测试提供稳定断言入口
+  - 为后续协议统一做铺垫
+- 因此新 Agent 必须同时维护：
+  - 现有消息通道
+  - 现有 `data` 字段
+  - 标准化 `agent_outputs`
 
-要求：
-1. agent_type="hybrid_rule_llm"
-2. 第一步做规则红旗检测：
-   - 应收账款增速 > 营收增速 × 1.5
-   - 经营现金流 < 净利润 × 0.5
-   - 商誉 / 净资产 > 30%
-   - 存货周转率持续下降
-3. 第二步把红旗列表交给LLM解释
-4. 即使LLM失败，也必须至少输出红旗数量和规则结果
-5. JSON容错 + 回测季度频率
-6. 保持 sentiment_agent 函数签名与 state 返回结构不变
-7. 标准化结果写入 state["data"]["agent_outputs"]["sentiment"]
-```
+### 4.5 消息命名必须稳定
 
-#### Agent 6：行业周期Agent（替换 `src/agents/macro_analyst.py`）
+后续工作中必须统一以下消息命名约定：
 
-给 Codex：
+- `technical_analyst_agent`
+- `fundamentals_agent`
+- `sentiment_agent`
+- `valuation_agent`
+- `researcher_bull`
+- `researcher_bear`
+- `debate_room_agent`
+- `risk_management_agent`
+- `macro_analyst_agent`
+- `portfolio_management_agent`
 
-```text
-重写 src/agents/macro_analyst.py 为行业周期Agent。
+说明：
 
-要求：
-1. agent_type="llm"
-2. 用行业周期视角分析：成长期 / 成熟期 / 衰退期
-3. 输出行业景气判断、政策敏感度、周期风险
-4. JSON容错：try-except + 3次重试 + 默认hold
-5. 保持 macro_analyst_agent 函数签名与 state 返回结构不变
-6. 标准化结果写入 state["data"]["agent_outputs"]["macro_analyst"]
-```
+- 历史上存在 `researcher_bull_agent` / `researcher_bull` 等兼容别名
+- 后续新增逻辑应以“单一规范命名”为目标，兼容逻辑仅保留在过渡阶段
 
-#### 修改3个Prompt
+### 4.6 Git 仓库卫生必须受控
+
+以下内容默认不进入 GitHub：
+
+- `data/`
+- `.superpowers/`
+- `stitch/`
+- 本地数据库文件
+- 本地缓存、日志、截图、预览文件
+- 会议记录类文件，除非明确需要纳入版本管理
+
+### 4.7 当前阶段优先解决“协议漂移”
+
+在继续增加新能力前，必须优先收敛以下问题：
+
+- 后端依赖 agent 名称映射、metadata 特判和多重 fallback 拼结果
+- 前端依赖多种返回形态和手动名称映射适配展示
+- `agent_outputs` 已有基础，但尚未成为真正稳定的统一出口
+
+因此，当前阶段的最高优先级不是“先加更多分析能力”，而是：
+
+1. 收敛消息命名
+2. 收敛 `agent_outputs`
+3. 让后端和前端逐步以稳定协议为主，而不是继续堆兼容层
+
+### 4.8 非核心范围冻结
+
+本项目当前阶段默认冻结以下范围，不再继续扩展功能：
+
+- 认证、权限、用户体系
+- 生产级监控、告警、审计平台化能力
+- Redis、CDN、WAF、集群、高可用部署等企业级包装
+- 与毕设主线无直接关系的后台外围能力
+
+说明：
+
+- 这些内容可以保留在现有仓库中，但不作为后续开发重点
+- 论文与答辩叙事应围绕异构 Agent、协议收敛、记忆型 RAG、联调验证和消融实验展开
+
+---
+
+## 5. 优化后的总体技术路线
+
+### 5.1 总原则
+
+本项目不是“所有 Agent 都用 LLM”的系统，也不是“把所有数据向量化”的系统。
+
+优化后的技术路线应为：
+
+1. 先收敛协议和命名，降低系统解释成本
+2. 再收敛第一层 Agent 的语义边界
+3. 结构化因子继续走确定性计算
+4. 主观分析类任务引入检索增强
+5. 前端与实验框架围绕异构特征展开
+
+### 5.2 异构架构分层
+
+| 层级 | 作用 | 典型节点 | 主要方法 |
+|:--|:--|:--|:--|
+| 数据层 | 提供本地优先输入 | `market_data_agent` | CSV / SQLite / API |
+| 确定性分析层 | 输出可重复、低延迟信号 | `technicals` / `valuation` / `risk_manager` | 规则 / 数学模型 / 统计 |
+| 证据增强分析层 | 处理主观文本判断 | `fundamentals` / `sentiment` / `macro_analyst` | LLM + 检索 + 规则 |
+| 观点博弈层 | 多空观点整合 | `researcher_bull` / `researcher_bear` / `debate_room` | Prompt + 聚合 |
+| 决策层 | 最终交易建议 | `portfolio_manager` | 聚合决策 |
+
+### 5.3 当前阶段最优执行顺序
+
+按当前仓库状态，最优执行顺序不是“先上 RAG”，而是：
+
+1. 先统一消息命名和 `agent_outputs`
+2. 再明确第一层 4 个 Agent 的语义边界
+3. 修正 `technicals` 的命名或职责，使其不再伪装成传统技术分析
+4. 若要把 `sentiment` 改成财报质量 Agent，必须同步 researcher、portfolio 和前端语义
+5. 只给 `fundamentals` 先上 SQLite-first 的记忆型 RAG
+6. `macro_analyst` 先做稳定结构化输出和兜底，不急着做重检索
+7. 5 只股票联调跑通后，再做前端收敛和消融实验
+
+---
+
+## 6. 最适合本项目的 RAG 架构
+
+### 6.1 推荐结论
+
+本项目推荐采用：
+
+**元数据约束的记忆型 RAG（Metadata-Constrained Memory RAG）**
+
+更准确地说，这是一种面向金融实体隔离场景的检索增强方案。它的核心目标不是“尽可能多地召回相似文本”，而是：
+
+1. 先确保不会串票
+2. 再在安全边界内做语义匹配
+3. 最后把少量高价值历史记忆注入当前分析
+
+### 6.2 为什么它比通用双召回更适合本项目
+
+本项目面临的首要风险不是“漏召回”，而是“跨标的误召回”。
+
+典型风险包括：
+
+- 分析 `600519` 时误召回 `000858` 的历史结论
+- 白酒、银行、电力等同质化板块中，因为文本表述相似而出现实体交叉污染
+- 同一只股票在不同季度被错误继承不适用的旧结论
+
+因此，本项目的 RAG 必须优先解决：
+
+- `stock_code` 隔离
+- `quarter / as_of_date` 隔离
+- `agent_type` 隔离
+
+这意味着：
+
+- 对你来说，“硬过滤”比“更复杂的召回策略”更重要
+- RAG 是 Agent 的长期记忆系统，不是通用搜索引擎
+
+### 6.3 本项目中的“双通道”应如何定义
+
+如果论文中需要保留“双通道”表述，应使用以下定义，而不是照搬通用文档问答系统的说法。
+
+本项目的“双通道”是：
+
+1. 结构化硬通道：基于元数据进行绝对过滤
+2. 非结构化软通道：在硬过滤后的安全候选集内做语义检索
+
+也就是说，本项目不是：
+
+- `BM25 + 向量` 的开放域双召回
+- `文本 + 视觉` 的多模态双通道
+
+而是：
+
+- `Metadata Hard Filter + Semantic Retrieval`
+
+### 6.4 推荐检索流程
+
+推荐的检索流程固定为：
+
+1. 按 `stock_code` 做硬过滤
+2. 再按 `quarter / as_of_date / agent_type / industry` 做二级过滤
+3. 仅在过滤后的候选集上做语义相似度排序
+4. 返回 `top_k=3~5` 条历史记忆
+5. 仅将摘要、引用和来源注入 Prompt
+6. 当前分析完成后，将结果回写到知识库
+
+推荐原则：
+
+- “先隔离，再相似”
+- 不允许“先全库相似，再人工解释”
+
+### 6.5 为什么不采用“全量向量化”
+
+以下数据不适合放入向量库作为主存储：
+
+- OHLCV 时序
+- PB 历史序列
+- 技术指标
+- DCF 计算中间量
+- VaR、波动率、回撤等纯数值因子
+
+原因：
+
+- 这类信息更适合精确计算，不适合语义检索
+- 向量化会引入不必要的不确定性
+- 会削弱回测可重复性和可解释性
+
+因此，本项目的 RAG 更接近“记忆增强层”，而不是“统一知识存储层”。
+
+### 6.6 最适合当前仓库的存储方案
+
+推荐采用“两级实现策略”。
+
+#### 第一阶段：SQLite-first 记忆基线方案
+
+- 继续使用现有 `data/ashare_agent.db`
+- 在数据库内新增知识库相关表
+- 把知识库存储为“带元数据的分析记忆”，而不是泛文档仓库
+
+推荐表结构方向：
+
+- `kb_documents`
+- `kb_chunks`
+- `kb_analysis_history`
+
+最低元数据字段应包含：
+
+- `stock_code`
+- `industry`
+- `agent_type`
+- `analysis_date`
+- `quarter`
+- `source_type`
+
+推荐检索实现：
+
+1. 先做元数据过滤
+2. 再做候选集内文本匹配或轻量相似度排序
+3. 返回少量高相关历史记忆
+
+优点：
+
+- 与当前项目已有 SQLite 能力天然兼容
+- 回测模式更稳定
+- 不新增重依赖
+- 更适合先把 Day4 跑通
+
+#### 第二阶段：可插拔向量增强方案
+
+当基线方案跑通后，再可选增加：
+
+- `sentence-transformers` 作为 embedding 组件
+- `ChromaDB` 或其他向量后端作为候选集内增强排序层
+
+注意：
+
+- 向量层是增强，不是唯一依赖
+- 不应把 `fundamentals.py` 直接绑死到某一向量库实现
+- 即使使用 `ChromaDB`，也必须保留元数据硬过滤优先级
+
+### 6.7 哪些内容进入知识库
+
+应该进入知识库：
+
+- 历史 `fundamentals` 输出的护城河分析摘要
+- 公司相关新闻正文与元数据
+- 宏观政策、行业公告、行业周期材料
+- 人工整理后的“公司竞争优势事实摘要”
+- 财报中的文本性风险点与摘要性证据
+
+不应该直接进入知识库作为主检索对象：
+
+- 原始 OHLCV
+- 原始 PB 时序
+- 高频技术指标
+- 纯数值财报字段全集
+- 完整 chain-of-thought
+- 高频噪声缓存
+
+### 6.8 RAG 输出注入原则
+
+RAG 不应把整段原文塞进 `state["messages"]`。
+
+推荐只传递：
+
+- 检索摘要
+- 引用片段列表
+- 文档 ID / citation ID
+- 使用到的证据来源说明
+- 当前检索条件摘要，例如 `stock_code` 与时间范围
+
+这样可以避免：
+
+- 状态膨胀
+- 重复传递大段文本
+- 下游聚合节点被无关上下文污染
+
+### 6.9 RAG 降级策略
+
+知识库模块必须支持以下降级：
+
+1. 数据库不可用：返回空检索结果，不抛致命异常
+2. 元数据过滤无结果：继续按无历史记忆模式运行
+3. 文本匹配或向量排序不可用：回退到更简单的候选集匹配
+4. 检索为空：Agent 继续按无检索上下文运行
+
+### 6.10 论文表述建议
+
+工程实现中，统一使用：
+
+- `元数据约束的记忆型 RAG`
+
+论文中，如需更有方法论风格的名称，可表述为：
+
+- `异构双通道检索策略`
+
+但正文必须明确说明：
+
+- 通道一是结构化元数据硬过滤
+- 通道二是过滤范围内的语义检索
+- 它不是开放域 BM25+向量双召回，也不是文本+视觉双通道
+
+审计友好提醒：
+
+- 不要在未完成实验前写“错误率为 0”
+- 不要在未实际落地 SQL 过滤时写“SQL 级别硬隔离”
+- 推荐写“元数据硬过滤”或“实体级硬约束”
+
+---
+
+## 7. Agent 改造目标矩阵
+
+### 7.1 已完成的异构 Agent
+
+| 文件 | 目标角色 | 类型 | 状态 |
+|:--|:--|:--|:--|
+| `src/agents/technicals.py` | 相对估值位置 Agent（PB 百分位） | `rule_engine` | 已完成 |
+| `src/agents/valuation.py` | DCF 估值 Agent | `quantitative_model` | 已完成 |
+| `src/agents/risk_manager.py` | 风险评估 Agent | `statistical_model` | 已完成 |
+
+### 7.2 下一阶段必须完成的 Agent
+
+| 文件 | 目标角色 | 推荐实现 | 状态 |
+|:--|:--|:--|:--|
+| `src/agents/fundamentals.py` | 基本面记忆增强 Agent（纵向变化检测） | `memory_enhanced_rule_engine` | Day7 进行中 |
+| `src/agents/sentiment.py` | 市场情绪 Agent（新闻） | `hybrid_rule_llm` | 已定稿（保持） |
+| `src/agents/macro_analyst.py` | 行业周期与政策敏感度 Agent（个股维度） | `llm` | Day7 进行中 |
+
+---
+
+## 8. 三个待改造 Agent 的明确要求
+
+### 8.0 第一层 Agent 的语义边界必须先收敛
+
+当前第一层存在两个明显问题：
+
+- `technicals.py` 的实现是 PB 历史百分位相对估值，不是传统技术面分析
+- `sentiment.py` 当前代表市场新闻情绪，但规划中想改造成财报质量 Agent
+
+因此，在继续实现前必须先收敛语义边界：
+
+1. `technicals` 二选一：
+   - 方案 A：正式改名为“relative valuation”或“估值位置”
+   - 方案 B：恢复为真实技术指标 Agent
+2. `sentiment` 二选一：
+   - 方案 A：继续承担“市场情绪”职责
+   - 方案 B：升级为“财报质量/红旗”职责
+
+如果选择方案 B，则必须同步修改：
+
+- `researcher_bull.py`
+- `researcher_bear.py`
+- `portfolio_manager.py`
+- 前端展示文案
+
+不允许只改 `sentiment.py`，却保留下游把它当“市场情绪”的旧语义。
+
+### 8.1 `fundamentals.py`：基本面记忆增强 Agent（Day7 采用方案 A）
+
+目标：
+
+- 保持规则引擎的可重复性与回测稳定性
+- 升级为“结构化财务事实 + 同标的历史记忆检索 + 纵向变化检测”的综合 Agent
+- LLM 护城河定性分析作为后续可选增强，不纳入 Day7 必做范围
+
+建议分析维度：
+
+- 品牌壁垒
+- 成本优势
+- 转换成本
+- 网络效应
+- 渠道或规模壁垒
+- 政策或牌照壁垒
+- 历史记忆对比（上期信号 vs 本期信号）
+
+最低输出要求：
+
+- `agent_type`
+- `signal`
+- `confidence`
+- `moat_rating`
+- `score`
+- `reasoning`
+- `retrieved_refs`
+- `memory_scope`
+
+必须满足：
+
+- 兼容现有 `fundamentals_agent` 函数签名
+- 兼容现有 LangGraph 外层 state 返回结构
+- 标准化结果写入 `state["data"]["agent_outputs"]["fundamentals"]`
+- 检索失败时仍返回合法 JSON
+- 检索时必须先按 `stock_code` 做硬过滤
+- 如有时间维度，再按 `quarter / as_of_date` 做二级过滤
+- 输出中补充纵向对比字段（例如 `memory_delta`）用于解释“信号变化原因”
+
+### 8.2 `sentiment.py`：市场情绪 Agent（Day7 口径锁定）
+
+目标：
+
+- 保持“新闻驱动的市场情绪”职责，确保上下游语义一致
+- 财报质量/红旗路线暂缓，避免 Day7 引入跨模块语义迁移风险
+
+当前执行范围：
+
+- 继续消费新闻抓取与情绪评分链路
+- 保持 `analysis_domain=market_sentiment` 与 `analysis_metric=news_sentiment_score_7d`
+
+必须满足：
+
+- 即使 LLM 失败，情绪层结果也必须可用
+- 输出至少包含：情绪信号、情绪分数、解释摘要
+- 标准化结果写入 `state["data"]["agent_outputs"]["sentiment"]`
+- 下游 Prompt、字段语义和前端文案保持“市场情绪（新闻）”一致口径
+
+### 8.3 `macro_analyst.py`：行业周期与政策敏感度 Agent
+
+目标：
+
+- 从“泛新闻解释”转向“行业位置 + 周期阶段 + 政策敏感度”分析
+
+建议分析维度：
+
+- 行业周期阶段：成长期 / 成熟期 / 下行期 / 复苏期
+- 政策敏感度
+- 景气度趋势
+- 监管风险
+- 宏观环境对个股的传导路径
+
+必须满足：
+
+- 输出结构稳定
+- 检索与 LLM 失败时有默认兜底
+- 标准化结果写入 `state["data"]["agent_outputs"]["macro_analyst"]`
+
+---
+
+## 9. Prompt 改造原则
+
+待调整文件：
 
 - `src/agents/researcher_bull.py`
-  - 改成“从安全边际、护城河、内在价值角度论证买入理由”
 - `src/agents/researcher_bear.py`
-  - 改成“从估值泡沫、财报风险、行业下行角度论证不买理由”
 - `src/agents/portfolio_manager.py`
-  - 改成“格雷厄姆式价值投资组合经理，以安全边际和风险暴露为核心”
 
-**论文素材：**
-- 各Agent系统Prompt
-- RAG检索日志截图
-- 护城河Agent“检索前/检索后”样例
-- 规则Agent与LLM Agent耗时对比
+优化原则：
 
----
+- 从“泛看多/看空”改为“价值投资语境下的多空论证”
+- `researcher_bull` 重点关注：
+  - 安全边际
+  - 护城河
+  - 竞争优势
+  - 长期价值兑现
+- `researcher_bear` 重点关注：
+  - 估值泡沫
+  - 财报质量风险
+  - 行业下行
+  - 政策压制
+- `portfolio_manager` 重点关注：
+  - 安全边际优先
+  - 风险暴露约束
+  - 组合层面仓位合理性
 
-### Day 6：统一通信协议 + 联调
+注意：
 
-#### 创建 `src/common/protocol.py`
-
-给 Codex：
-
-```text
-创建 src/common/protocol.py，定义异构Agent统一通信协议 AgentMessage。
-
-要求：
-1. 使用 Pydantic BaseModel
-2. 字段包含：
-   - agent_id: str
-   - agent_type: str
-   - signal: str
-   - confidence: float
-   - reasoning: str
-   - structured_data: dict
-   - execution_time_ms: float
-   - token_usage: int
-   - timestamp: datetime
-3. 注意：
-   - 不能让 LangGraph 节点直接只返回 AgentMessage
-   - 外层必须继续返回 {"messages": ..., "data": ..., "metadata": ...}
-4. 每个Agent把标准化 AgentMessage 写入：
-   state["data"]["agent_outputs"][agent_name] = agent_message.model_dump()
-5. portfolio_manager 和前端统一从 agent_outputs 读取
-```
-
-#### 联调测试5只股票
-
-```powershell
-poetry run python -m src.main --ticker 600519 --show-reasoning
-poetry run python -m src.main --ticker 000333 --show-reasoning
-poetry run python -m src.main --ticker 601398 --show-reasoning
-poetry run python -m src.main --ticker 002415 --show-reasoning
-poetry run python -m src.main --ticker 601857 --show-reasoning
-```
-
-**论文素材：**
-- AgentMessage协议图
-- 统一输出样例
-- 5只股票完整分析截图
+- Prompt 可以改，但下游读取的 JSON 结构和关键字段不应随意变化
 
 ---
 
-### Day 7-8：前端微调 + 消融实验框架
+## 10. 统一输出协议目标
 
-#### 前端微调
+### 10.1 当前阶段要求
 
-给 Codex：
+每个 Agent 至少在 `agent_outputs` 中输出以下最小字段：
 
-```text
-修改 AShareAgent 前端，围绕异构Agent展示做最小但关键的可视化增强。
+- `agent_type`
+- `signal`
+- `confidence`
+- `reasoning`
 
-重点文件：
-1. frontend/src/App.tsx
-   - 标题改为“基于异构多智能体的A股价值投资分析系统”
-2. frontend/src/components/AnalysisStatus.tsx
-   - 展示 agent_outputs
-   - 显示每个Agent的 agent_type、signal、confidence、execution_time_ms、token_usage
-3. frontend/src/components/AgentDashboard.tsx
-   - 把 agent_type 标签颜色映射成异构类别
-4. frontend/src/services/api.ts
-   - 新增 AgentMessage 类型定义
-   - 为分析结果补充 agent_outputs 字段类型
-```
+如有结构化分析结果，继续补充：
 
-#### 消融实验框架（创新点3）
+- `structured_data`
+- `citations`
+- `risk_metrics`
+- `valuation_metrics`
+- `retrieved_refs`
 
-给 Codex：
+### 10.2 下一阶段目标
 
-```text
-创建 src/experiments/ablation.py，实现自动化消融实验框架。
+后续可创建统一协议模型，例如 `AgentMessage`，但必须遵守：
 
-要求：
-1. 复用 src/backtesting/ 现有回测能力
-2. 支持以下实验配置：
-   - full_heterogeneous
-   - full_homogeneous
-   - no_rule_agents
-   - no_llm_agents
-   - single_agent_removed_x
-3. 评价6个维度：
-   - 年化收益
-   - 夏普比率
-   - Token消耗总量
-   - 平均响应时间
-   - API故障可用率
-   - 可解释性得分
-4. 输出CSV、Markdown报告和图表
-```
-
-**论文素材：**
-- 前端异构展示截图
-- 消融实验框架代码截图
-- 实验配置说明图
+- 只作为内部标准化对象
+- LangGraph 外层返回结构不变
+- 老的消息链路继续兼容
 
 ---
 
-### Day 9-10：跑实验 + 收集核心数据
+## 11. 剩余开发路线图
 
-```powershell
-poetry run python -m src.experiments.ablation `
-  --stocks 600519,000858,000333,601398,600036,002415,300750,603288,600028,601857 `
-  --start 2023-01-01 `
-  --end 2025-12-31
-```
+### 11.0 Day4-Day8 总表
 
-#### 论文核心数据
+| 阶段 | 当天主任务 | 前置依赖 | 论文/答辩产出 | 当前状态 |
+|:--|:--|:--|:--|:--|
+| Day 4 | 协议收敛 + 命名收敛 | Day2-3 已完成 | 协议统一前后对比、命名规范说明、后端/前端兼容层收敛说明 | `已完成` |
+| Day 5 | 第一层 Agent 语义收敛 | Day 4 完成 | `technicals` 与 `valuation` 边界说明、`sentiment` 语义选择说明 | `已完成` |
+| Day 6 | `fundamentals` 记忆型 RAG + `knowledge_base.py` | Day 5 完成 | 记忆型 RAG 架构图、检索样例、检索前后对比 | `已完成` |
+| Day 7 | `macro_analyst` 稳定化 + 5 只股票联调 | Day 6 完成 | 联调截图、结构化输出样例、失败兜底样例 | `待开始` |
+| Day 8 | 前端收敛 + 消融实验框架 | Day 7 完成 | 前端异构展示截图、消融实验结果表、评价指标说明 | `待开始` |
 
-**表5-1：异构 vs 同构 多维度对比**
+### 11.1 勾选版清单
 
-| 指标 | 异构系统 | 同构基线 | 差异 | 谁赢 |
-|:---|:---|:---|:---|:---|
-| 平均年化收益 | XX% | XX% | | 看结果 |
-| 平均夏普比率 | XX | XX | | 看结果 |
-| 单次Token消耗 | XX | XX | -XX% | 异构 |
-| 平均响应时间 | XX秒 | XX秒 | -XX% | 异构 |
-| API故障可用率 | XX% | XX% | | 看结果 |
-| 可解释性得分 | XX | XX | | 异构 |
+- [x] Day 4：协议收敛 + 命名收敛
+- [x] Day 5：第一层 Agent 语义收敛
+- [x] Day 6：`fundamentals` 记忆型 RAG + `knowledge_base.py`
+- [ ] Day 7：`macro_analyst` 稳定化 + 5 只股票联调
+- [ ] Day 8：前端收敛 + 消融实验框架
 
-> [!IMPORTANT]
-> 论文结论不要只押宝收益率。你的主结论应该写成：
-> “异构架构在综合评价体系下优于同构架构，尤其在成本、响应速度、鲁棒性和可解释性方面更有优势。”
+### 11.2 Day 4：协议收敛 + 命名收敛
 
-**表5-2：逐一消融分析**
+目标：
 
-| 去掉的Agent | 收益变化 | 夏普变化 | 响应变化 | 说明 |
-|:---|:---|:---|:---|:---|
-| -估值Agent | XX% | XX | XX | 说明其贡献 |
-| -DCF Agent | XX% | XX | XX | |
-| -风险Agent | XX% | XX | XX | |
-| -护城河+RAG Agent | XX% | XX | XX | |
-| -财报质量Agent | XX% | XX | XX | |
-| -行业周期Agent | XX% | XX | XX | |
+- 让后端和前端逐步以 `agent_outputs` 为主，而不是继续堆兼容逻辑
+- 收敛消息命名、Agent 名称映射和 reasoning 键名
+- 补齐第一批协议层测试
 
-**表5-3：与传统策略对比**
+验收标准：
 
-用你已有的 PB 回测系统跑同期数据，对比：
-- 本系统
-- Buy & Hold
-- PB价值策略
-- 均线策略
+- 后端不再依赖多层 agent-specific fallback 才能拿到核心结果
+- 前端展示链路优先消费稳定的 `agent_outputs`
+- 消息命名与输出键名有明确规范并落实到代码
 
----
+### 11.3 Day 5：第一层 Agent 语义收敛
 
-### Day 11-12：论文撰写
+目标：
 
-```text
-第1章 绪论（5页）
-  1.1 研究背景
-  1.2 国内外现状
-  1.3 研究内容与贡献
+- 明确 `technicals` 的最终命名与职责
+- 明确 `sentiment` 保留市场情绪还是升级为财报质量
+- 让 researcher、portfolio、前端文案与第一层 Agent 语义一致
 
-第2章 相关技术（8页）
-  2.1 多智能体系统
-  2.2 大语言模型
-  2.3 检索增强生成（RAG）
-  2.4 LangGraph工作流编排
-  2.5 价值投资理论（简述，不喧宾夺主）
+验收标准：
 
-第3章 系统设计（14页）核心
-  3.1 系统总体架构
-  3.2 异构智能体设计
-      3.2.1 规则引擎型（technicals.py）
-      3.2.2 量化模型型（valuation.py）
-      3.2.3 统计模型型（risk_manager.py）
-      3.2.4 LLM+RAG型（fundamentals.py）
-      3.2.5 混合型（sentiment.py）
-      3.2.6 LLM型（macro_analyst.py）
-  3.3 统一通信协议设计（AgentMessage）
-  3.4 本地CSV数据适配设计
-  3.5 异构时间频率策略
-  3.6 多智能体协作机制
-  3.7 容错与缓存机制
+- 不再存在“字段能通但语义错位”的隐性问题
+- `technicals` 与 `valuation` 的职责边界清晰
+- `sentiment` 的上下游解释口径统一
 
-第4章 系统实现（10页）
-  4.1 开发环境
-  4.2 本地CSV数据层实现
-  4.3 各Agent实现
-  4.4 RAG模块实现
-  4.5 前后端联动实现
-  4.6 系统运行展示
+### 11.4 Day 6：知识库基线 + `fundamentals` 升级
 
-第5章 实验与分析（10页）
-  5.1 实验方案设计
-  5.2 多维度评价指标体系
-  5.3 异构vs同构实验
-  5.4 逐一消融分析
-  5.5 与传统策略对比
-  5.6 典型案例分析
+目标：
 
-第6章 总结与展望（3页）
-  6.1 主要工作与创新点
-  6.2 不足
-  6.3 展望
+- 新建 `src/rag/knowledge_base.py`
+- 先实现 SQLite-first 的元数据记忆检索基线
+- 完成 `fundamentals.py` 的记忆型 RAG 改造
 
-附录A：各Agent提示词模板
-附录B：AgentMessage协议定义
-附录C：本地CSV适配层关键代码
-```
+验收标准：
 
----
+- 知识库不可用时 `fundamentals` 仍可正常返回
+- `fundamentals` 输出包含 `retrieved_refs`
+- `fundamentals` 输出包含 `memory_scope`
+- 检索流程明确体现 `stock_code` 硬过滤
+- 单测覆盖检索成功、检索为空、知识库异常三类路径
 
-### Day 13：答辩PPT
+### 11.5 Day 7：`macro_analyst` 稳定化 + 5 只股票联调
 
-**必背3句话：**
+目标：
 
-**1. 异构含义**
-> “本系统不是给同一个LLM分配不同角色，而是在 LangGraph 工作流中真正融合了规则引擎、量化模型、统计方法和 LLM 增强分析，并通过统一协议协作。”
+- 完成 `macro_analyst` 的稳定结构化输出与兜底
+- 跑通 5 只股票联调
+- 确认前端展示链路与主流程结果一致
 
-**2. RAG贡献**
-> “我们为护城河分析Agent引入了 ChromaDB 知识库，使其能够检索历史分析结果，在新一轮分析中复用历史上下文，从而提升一致性和可追溯性。”
+本轮 Day7 口径冻结（2026-04-09）：
 
-**3. 实验方法**
-> “我们采用多维度消融实验，不仅比较收益率，还比较Token成本、响应速度、系统鲁棒性和可解释性，因此更适合作为计算机系统设计类毕业设计的评价方法。”
+- `fundamentals` 采用方案 A：`rule_engine + memory_rag`，不在 Day7 引入 LLM 护城河推理
+- `sentiment` 保持市场情绪 Agent，不切换到财报质量语义
+- 保留 `macro_news_agent` 与 `macro_analyst_agent` 双节点并明确分工：
+  - `macro_news_agent`：市场面并行新闻汇总（指数级宏观背景）
+  - `macro_analyst_agent`：个股维度宏观影响判断（风险后阶段）
 
----
+建议测试标的：
 
-### Day 14：缓冲
+- `600519`
+- `000333`
+- `601398`
+- `002415`
+- `601857`
 
-- [ ] 系统完整演示
-- [ ] 论文排版
-- [ ] PPT排练
-- [ ] 截图清晰
+验收标准：
+
+- `macro_analyst` 写入稳定的 `agent_outputs`
+- 主流程可跑通
+- 输出结构稳定
+- 前端可消费核心字段
+
+### 11.6 Day 8：前端收敛 + 消融实验框架
+
+目标：
+
+- 前端减少兼容分支，逐步以稳定协议展示结果
+- 复用 `src/backtesting/` 构建消融实验
+- 在联调通过后再做异构与非异构对比
+
+验收标准：
+
+- 前端不需要花哨，但必须能看出“异构”而不是“一堆文本日志”
+- 至少比较以下配置：
+  - `full_heterogeneous`
+  - `full_homogeneous`
+  - `no_rule_agents`
+  - `no_llm_agents`
+  - `remove_single_agent_x`
+- 至少输出以下指标：
+  - 年化收益
+  - 夏普比率
+  - 最大回撤
+  - 平均响应时间
+  - Token 消耗
+  - API 可用性/降级次数
 
 ---
 
-## 六、工作量分布（回答“你到底做了什么”）
+## 12. 验证与完成定义
 
-```text
-复用原项目（35%）：
-  - FastAPI后端
-  - React前端
-  - LangGraph工作流
-  - 原有回测框架
+### 12.1 每轮开发完成前必须验证
 
-结构化改造（25%）：
-  - 6个核心Agent重构
-  - 3个Prompt改造
-  - 本地CSV数据接入
-  - 协议兼容改造
+- 单测通过
+- 新增功能至少有一个失败路径测试
+- 不引入对 `data/` 被 Git 跟踪的隐性依赖
+- 回测模式不偷偷访问远程接口
 
-原创工作（40%）：
-  - RAG知识库模块（ChromaDB）
-  - AgentMessage统一通信协议
-  - 消融实验自动化框架
-  - 多维度评价指标体系
-  - 前端异构可视化与性能展示
-```
+### 12.2 每个关键模块的完成定义
+
+一个模块只有同时满足以下条件才算完成：
+
+1. 代码实现落地
+2. 失败路径有兜底
+3. 单测覆盖核心逻辑
+4. 不破坏现有 LangGraph 主流程
+5. 输出结构能被前端或测试消费
 
 ---
 
-## 七、Codex项目级指令
+## 13. Git 与分支策略
 
-```text
-这是计算机专业毕业设计“基于异构多智能体的A股价值投资分析系统”。
-基础代码：https://github.com/1517005260/AShareAgent
-技术栈：FastAPI + React + LangGraph + ChromaDB + DeepSeek API
+推荐原则：
 
-核心要求：
-1. 真实仓库文件名以 AShareAgent 当前结构为准：
-   - technicals.py
-   - valuation.py
-   - risk_manager.py
-   - fundamentals.py
-   - sentiment.py
-   - macro_analyst.py
-2. 本地离线数据统一放在 data/
-3. 优先通过 src/tools/local_csv_provider.py + src/tools/api.py 读取本地CSV
-4. 回测时禁止外部网络请求
-5. LLM型Agent回测中按季度运行
-6. 所有LLM JSON输出必须 try-except + 3次重试 + 默认HOLD兜底
-7. 统一协议使用 AgentMessage，但 LangGraph 节点外层返回值仍保持原 state dict 结构
-8. 每个Agent都要把标准化结果写入 state["data"]["agent_outputs"]
-9. 每个Agent必须记录：
-   - agent_type
-   - signal
-   - confidence
-   - execution_time_ms
-   - token_usage
+- 功能开发走 `codex/<topic>` 分支
+- 大数据和本地环境文件不进 GitHub
+- 提交前先确认：
+  - `data/` 未被追踪
+  - `.superpowers/` 未被追踪
+  - `stitch/` 未被追踪
+  - 本地数据库未被追踪
 
-异构Agent类型：
-- rule_engine: 纯规则，不调LLM
-- quantitative_model: 纯数学公式
-- statistical_model: 纯统计风险评估
-- llm_rag: LLM + ChromaDB 检索
-- hybrid_rule_llm: 先规则后LLM
-- llm: 纯LLM
-```
+---
+
+## 14. 论文素材清单
+
+后续实现过程中应主动积累以下素材：
+
+- 本地优先数据链路截图
+- 3 个非 LLM Agent 的代码与运行截图
+- RAG 检索日志与引用样例
+- `fundamentals` 检索前/检索后对比样例
+- 统一输出协议样例
+- 5 只股票的联调输出截图
+- 消融实验结果表格
+
+---
+
+## 15. 这份指南的执行原则
+
+从本版本开始，后续工作统一按以下顺序推进：
+
+1. 先对齐仓库真实状态
+2. 再确定不可破坏的约束
+3. 再做模块实现
+4. 最后做联调、前端和实验
+
+换句话说：
+
+- 不再为了“照着旧指南完成任务”而硬套不合适的实现
+- 一切以“最适合当前项目的工程方案”为准

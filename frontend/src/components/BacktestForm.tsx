@@ -31,12 +31,19 @@ interface BacktestFormProps {
   onBacktestStart: (runId: string) => void;
 }
 
+const frequencyOptions = [
+  { value: 'daily', label: '每日' },
+  { value: 'weekly', label: '每周' },
+  { value: 'monthly', label: '每月' },
+  { value: 'conditional', label: '条件触发' },
+];
+
 const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const enableAdvanced = Form.useWatch('enable_advanced', form);
 
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: Record<string, any>) => {
     setLoading(true);
     try {
       const request: BacktestRequest = {
@@ -64,7 +71,6 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
         if (values.transaction_cost !== undefined) {
           request.transaction_cost = values.transaction_cost;
         }
-
         if (values.slippage !== undefined) {
           request.slippage = values.slippage;
         }
@@ -79,8 +85,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
         message.error(response.message || '启动回测失败');
       }
     } catch (error: any) {
-      console.error('Backtest start error:', error);
-      message.error(error.response?.data?.detail || '启动回测失败');
+      message.error(error?.response?.data?.detail || '启动回测失败');
     } finally {
       setLoading(false);
     }
@@ -94,8 +99,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
             <span className="section-kicker">Strategy Lab</span>
             <h3 className="section-title">多智能体策略回测实验台</h3>
             <p className="section-description">
-              这一页用于验证异构多智能体在不同时间区间、成本条件和执行频率下的表现。
-              我们保留原有回测能力，但改造成更适合展示和答辩截图的界面结构。
+              用统一协议观察不同 Agent 组合在不同时间区间、交易成本与执行频率下的收益与风险表现。
             </p>
           </div>
           <div className="backtest-highlight">
@@ -118,8 +122,8 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
           className="mb-4"
           type="info"
           showIcon
-          message="当前页面会将基础参数和高级配置分层呈现"
-          description="默认模式适合快速运行回测；高级配置用于对比异构 Agent 的执行频率、交易成本和时间粒度。"
+          message="基础参数与高级配置分层展示"
+          description="默认模式适合快速验证；启用高级配置后可控制 Agent 频率、交易成本与滑点。"
         />
 
         <Form
@@ -165,7 +169,9 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
               <RangePicker
                 style={{ width: '100%' }}
                 format="YYYY-MM-DD"
-                disabledDate={(current) => current && current > dayjs().endOf('day')}
+                disabledDate={(current) =>
+                  Boolean(current && current > dayjs().endOf('day'))
+                }
                 placeholder={['开始日期', '结束日期']}
               />
             </Form.Item>
@@ -175,22 +181,13 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
               label="初始资金"
               rules={[{ required: true, message: '请输入初始资金' }]}
             >
-              <InputNumber
-                min={1000}
-                max={10000000}
-                step={1000}
-                style={{ width: '100%' }}
-                formatter={(value) =>
-                  `¥${String(value ?? '').replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`
-                }
-                parser={(value) => Number(String(value ?? '').replace(/[¥,\s]/g, '')) as any}
-              />
+              <InputNumber min={1000} max={10000000} step={1000} style={{ width: '100%' }} />
             </Form.Item>
 
             <Form.Item
               name="num_of_news"
               label="新闻样本数"
-              tooltip="情绪与宏观相关分析可参考的新闻条数"
+              tooltip="情绪与宏观分析可参考的新闻条数"
             >
               <InputNumber min={1} max={100} style={{ width: '100%' }} />
             </Form.Item>
@@ -202,7 +199,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                 <span className="section-kicker">Baseline Setup</span>
                 <h4 className="inner-panel-title">基础实验参数</h4>
               </div>
-              <Text type="secondary">默认配置适合快速验证策略链路</Text>
+              <Text type="secondary">默认配置适合快速跑通回测</Text>
             </div>
 
             <Row gutter={16}>
@@ -210,7 +207,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                 <Form.Item
                   name="time_granularity"
                   label="时间粒度"
-                  tooltip="决定策略执行与回测数据采样频率"
+                  tooltip="决定策略执行与数据采样频率"
                 >
                   <Select
                     options={[
@@ -222,11 +219,12 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                   />
                 </Form.Item>
               </Col>
+
               <Col xs={24} md={8}>
                 <Form.Item
                   name="benchmark_type"
                   label="基准策略"
-                  tooltip="用于和多智能体策略做对比的参照对象"
+                  tooltip="用于对比回测结果的参考策略"
                 >
                   <Select
                     options={[
@@ -239,11 +237,12 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                   />
                 </Form.Item>
               </Col>
+
               <Col xs={24} md={8}>
                 <Form.Item
                   name="rebalance_frequency"
                   label="调仓频率"
-                  tooltip="控制组合重平衡节奏"
+                  tooltip="控制组合再平衡节奏"
                 >
                   <Select
                     options={[
@@ -278,7 +277,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                         <div>
                           <strong>启用高级配置</strong>
                           <Paragraph className="advanced-toggle-copy">
-                            打开后可以自定义交易成本、滑点和各 Agent 的执行频率。
+                            启用后可设置交易成本、滑点以及各 Agent 执行频率。
                           </Paragraph>
                         </div>
                       </div>
@@ -292,8 +291,9 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                               <span className="section-kicker">Trading Cost</span>
                               <h4 className="inner-panel-title">交易成本假设</h4>
                             </div>
-                            <Text type="secondary">控制手续费和滑点，方便做成本敏感性实验</Text>
+                            <Text type="secondary">用于成本敏感性实验</Text>
                           </div>
+
                           <Row gutter={16}>
                             <Col xs={24} md={12}>
                               <Form.Item
@@ -307,12 +307,6 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                                   step={0.0001}
                                   precision={4}
                                   style={{ width: '100%' }}
-                                  formatter={(value) =>
-                                    `${(Number(value ?? 0) * 100).toFixed(3)}%`
-                                  }
-                                  parser={(value) =>
-                                    Number(String(value ?? '').replace('%', '')) / 100 as any
-                                  }
                                 />
                               </Form.Item>
                             </Col>
@@ -328,12 +322,6 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                                   step={0.0001}
                                   precision={4}
                                   style={{ width: '100%' }}
-                                  formatter={(value) =>
-                                    `${(Number(value ?? 0) * 100).toFixed(3)}%`
-                                  }
-                                  parser={(value) =>
-                                    Number(String(value ?? '').replace('%', '')) / 100 as any
-                                  }
                                 />
                               </Form.Item>
                             </Col>
@@ -346,34 +334,29 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                               <span className="section-kicker">Agent Frequency</span>
                               <h4 className="inner-panel-title">异构 Agent 执行频率</h4>
                             </div>
-                            <Text type="secondary">用于模拟不同分析模块的时间尺度差异</Text>
+                            <Text type="secondary">用于控制不同分析模块的触发节奏</Text>
                           </div>
+
                           <Alert
                             className="mb-4"
                             type="info"
                             showIcon
                             message="频率说明"
-                            description="日级适合高频数据、周级适合常规分析、月级适合估值与基本面，条件触发适合波动或事件驱动场景。"
+                            description="日级适合高频数据，周/月级更适合中长期逻辑，条件触发适合事件驱动。"
                           />
+
                           <div className="parameter-grid parameter-grid--compact">
                             {[
                               ['market_data_freq', '市场数据 Agent'],
-                              ['technical_freq', '技术分析 Agent'],
+                              ['technical_freq', 'Relative Valuation (PB Percentile) Agent'],
                               ['fundamentals_freq', '基本面 Agent'],
-                              ['sentiment_freq', '情绪分析 Agent'],
+                              ['sentiment_freq', 'Market Sentiment (News) Agent'],
                               ['valuation_freq', '估值 Agent'],
                               ['macro_freq', '宏观 Agent'],
                               ['portfolio_freq', '组合管理 Agent'],
                             ].map(([name, label]) => (
                               <Form.Item key={name} name={name} label={label}>
-                                <Select
-                                  options={[
-                                    { value: 'daily', label: '每日' },
-                                    { value: 'weekly', label: '每周' },
-                                    { value: 'monthly', label: '每月' },
-                                    { value: 'conditional', label: '条件触发' },
-                                  ]}
-                                />
+                                <Select options={frequencyOptions} />
                               </Form.Item>
                             ))}
                           </div>
@@ -386,7 +369,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                           <div>
                             <strong>当前为简化模式</strong>
                             <Paragraph className="advanced-toggle-copy">
-                              开启高级配置后，这里会显示异构 Agent 执行频率、交易成本与滑点设置。
+                              启用高级配置后可设置 Agent 频率与交易成本参数。
                             </Paragraph>
                           </div>
                         </Space>
@@ -402,7 +385,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
             <Button type="primary" htmlType="submit" loading={loading} size="large">
               运行回测
             </Button>
-            <Text type="secondary">提交后系统会在后台执行回测，并在本页实时更新状态。</Text>
+            <Text type="secondary">提交后系统将在后台执行并实时更新状态。</Text>
           </div>
         </Form>
       </Card>

@@ -1,5 +1,12 @@
+import os
+
 from langchain_core.messages import HumanMessage
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.news_crawler import get_stock_news
 from src.utils.logging_config import setup_logger
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
@@ -12,14 +19,161 @@ from src.database.data_service import get_data_service
 logger = setup_logger('macro_analyst_agent')
 
 
+def _ensure_agent_outputs(data: dict) -> dict:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
+_VALID_MACRO_LABELS = {"positive", "neutral", "negative"}
+_VALID_SIGNALS = {"bullish", "neutral", "bearish"}
+
+
+def _normalize_macro_label(value: str | None, default: str = "neutral") -> str:
+    text = str(value or "").strip().lower()
+    return text if text in _VALID_MACRO_LABELS else default
+
+
+def _normalize_confidence(value, fallback: str = "60%") -> str:
+    if isinstance(value, (int, float)):
+        score = float(value)
+        if 0 <= score <= 1:
+            score *= 100
+        score = max(0.0, min(score, 100.0))
+        return f"{round(score)}%"
+
+    if isinstance(value, str):
+        text = value.strip()
+        if text.endswith("%"):
+            try:
+                score = float(text[:-1].strip())
+            except ValueError:
+                return fallback
+            score = max(0.0, min(score, 100.0))
+            return f"{round(score)}%"
+        try:
+            score = float(text)
+        except ValueError:
+            return fallback
+        if 0 <= score <= 1:
+            score *= 100
+        score = max(0.0, min(score, 100.0))
+        return f"{round(score)}%"
+
+    return fallback
+
+
+def _default_confidence_for_macro(impact_on_stock: str, key_factors: list[str]) -> str:
+    score = 55
+    if impact_on_stock in {"positive", "negative"}:
+        score += 10
+    if len(key_factors) >= 3:
+        score += 10
+    return f"{min(score, 90)}%"
+
+
+def _normalize_macro_message(payload) -> dict:
+    source = payload if isinstance(payload, dict) else {}
+    macro_environment = _normalize_macro_label(source.get("macro_environment"))
+    impact_on_stock = _normalize_macro_label(source.get("impact_on_stock"))
+
+    raw_factors = source.get("key_factors")
+    if isinstance(raw_factors, list):
+        key_factors = [str(item).strip() for item in raw_factors if str(item).strip()]
+    else:
+        key_factors = []
+
+    reasoning = source.get("reasoning")
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        reasoning = "Macro analysis fallback used due missing or invalid model output."
+
+    derived_signal = {
+        "positive": "bullish",
+        "negative": "bearish",
+        "neutral": "neutral",
+    }[impact_on_stock]
+    signal = str(source.get("signal", "")).strip().lower()
+    if signal not in _VALID_SIGNALS:
+        signal = derived_signal
+
+    default_confidence = _default_confidence_for_macro(impact_on_stock, key_factors)
+    confidence = _normalize_confidence(source.get("confidence"), default_confidence)
+
+    normalized = dict(source)
+    normalized.update(
+        {
+            "agent_type": str(source.get("agent_type") or "llm"),
+            "macro_environment": macro_environment,
+            "impact_on_stock": impact_on_stock,
+            "key_factors": key_factors,
+            "reasoning": reasoning,
+            "signal": signal,
+            "confidence": confidence,
+            "analysis_domain": str(source.get("analysis_domain") or "macro_cycle_policy"),
+        }
+    )
+    return normalized
+
+
 @agent_endpoint("macro_analyst", "宏观分析师，分析宏观经济环境对目标股票的影响")
 def macro_analyst_agent(state: AgentState):
     """Responsible for macro analysis"""
     show_workflow_status("Macro Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
     data = state["data"]
+
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="macro_analyst",
+        agent_type="llm",
+        message_name="macro_analyst_agent",
+        output_key="macro_analyst",
+        data_key="macro_analysis",
+        payload_overrides={
+            "analysis_domain": "macro_cycle_policy",
+            "macro_environment": "neutral",
+            "impact_on_stock": "neutral",
+            "key_factors": [],
+        },
+    )
+    if ablation_result is not None:
+        return ablation_result
+
     symbol = data["ticker"]
     logger.info(f"正在进行宏观分析: {symbol}")
+
+    # --- Backtest-safe guard: skip all remote calls in backtest mode ---
+    _backtest_mode = os.getenv("ASHAREAGENT_BACKTEST_MODE", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+    if _backtest_mode:
+        logger.info("Backtest mode enabled: returning deterministic macro fallback")
+        message_content = _normalize_macro_message({
+            "macro_environment": "neutral",
+            "impact_on_stock": "neutral",
+            "key_factors": ["回测模式：跳过远程新闻和LLM调用"],
+            "reasoning": "Backtest mode active. Remote news crawling and LLM calls skipped for reproducibility.",
+            "signal": "neutral",
+            "confidence": "50%",
+        })
+        message = HumanMessage(
+            content=json.dumps(message_content, ensure_ascii=False),
+            name="macro_analyst_agent",
+        )
+        if show_reasoning:
+            show_agent_reasoning(message_content, "Macro Analysis Agent")
+        updated_data = dict(data)
+        agent_outputs = _ensure_agent_outputs(updated_data)
+        agent_outputs["macro_analyst"] = message_content
+        state["metadata"]["agent_reasoning"] = message_content
+        show_workflow_status("Macro Analyst", "completed")
+        return {
+            "messages": [message],
+            "data": {**updated_data, "macro_analysis": message_content},
+            "metadata": state["metadata"],
+        }
 
     # 获取 end_date 并传递给 get_stock_news
     end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date
@@ -103,11 +257,16 @@ def macro_analyst_agent(state: AgentState):
         macro_analysis = get_macro_news_analysis(recent_news)
         message_content = macro_analysis
 
+    message_content = _normalize_macro_message(message_content)
+
     # 如果需要显示推理过程
     if show_reasoning:
         show_agent_reasoning(message_content, "Macro Analysis Agent")
     
     # 始终保存推理信息到metadata供API使用
+    updated_data = dict(data)
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["macro_analyst"] = message_content
     state["metadata"]["agent_reasoning"] = message_content
 
     # 创建消息
@@ -121,9 +280,9 @@ def macro_analyst_agent(state: AgentState):
     # logger.info(
     # f"--- DEBUG: macro_analyst_agent RETURN messages: {[msg.name for msg in (state['messages'] + [message])]} ---")
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": {
-            **data,
+            **updated_data,
             "macro_analysis": message_content
         },
         "metadata": state["metadata"],

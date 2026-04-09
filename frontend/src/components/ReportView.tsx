@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { Card, Typography, Tag, Divider, Row, Col, Badge, Alert } from 'antd';
 import {
   ArrowUpOutlined,
@@ -11,6 +11,7 @@ import {
   TrophyOutlined,
   WarningOutlined
 } from '@ant-design/icons';
+import { normalizeAnalysisPayload } from '../utils/analysisResult';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -18,24 +19,7 @@ interface ReportViewProps {
   data: any;
 }
 
-// 为各个分析模块提供默认的分析说明
-const getDefaultReasoning = (agentName: string): string => {
-  const reasoningMap: {[key: string]: string} = {
-    'technical_analysis': '技术分析基于价格走势、交易量和技术指标进行评估。通过分析趋势、动量、支撑阻力位等因素，为投资决策提供技术面依据。',
-    'fundamental_analysis': '基本面分析评估公司的财务健康状况，包括盈利能力、成长性、财务稳定性等关键指标。通过分析ROE、净利润率、营收增长等数据判断公司内在价值。',
-    'sentiment_analysis': '情感分析通过分析市场新闻、社交媒体情绪、投资者行为等因素，评估市场对该股票的整体情绪倾向和预期。',
-    'valuation_analysis': '估值分析运用DCF模型、所有者收益法等估值方法，计算股票的内在价值，并与当前市场价格比较以判断是否存在投资机会。',
-    'risk_management': '风险管理分析评估投资风险水平，包括波动性、最大回撤、VaR等风险指标，并提供仓位建议和风险控制措施。',
-    'selected_stock_macro_analysis': '宏观分析评估宏观经济环境对个股的影响，包括政策变化、经济周期、行业发展等宏观因素的综合分析。',
-    'market_wide_news_summary(沪深300指数)': '大盘新闻分析通过分析沪深300指数相关新闻和市场动态，评估整体市场环境和趋势对个股的影响。',
-    'ashare_policy_impact': 'A股政策影响分析专门评估中国股市政策变化对投资的影响，包括监管政策、财政政策、货币政策等。',
-    'liquidity_assessment': '流动性评估分析市场流动性状况，包括成交量、买卖价差、市场深度等因素，评估交易执行的便利性和成本。'
-  };
-  return reasoningMap[agentName] || `${agentName}的专业分析结果`;
-};
-
 const ReportView: React.FC<ReportViewProps> = ({ data }) => {
-  // 检查数据有效性
   if (!data) {
     return (
       <Alert
@@ -47,171 +31,23 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
     );
   }
 
-  // 检查数据结构并适配不同的返回格式
   console.log('ReportView received data:', data);
-  
-  // 尝试从不同来源获取数据
-  let analysisData: any = null;
-  let agent_results: any = null;
-  
-  // 优先级1: 处理portfolio manager的直接输出格式 (最准确的数据)
-  if ((data.action && data.agent_signals && Array.isArray(data.agent_signals)) || 
-      (data.final_decision && data.final_decision.agent_signals && Array.isArray(data.final_decision.agent_signals))) {
-    // 这是portfolio manager的直接输出格式，需要转换
-    analysisData = data;
-    
-    // 首先检查是否有原始的agent_results数据
-    if (data.agent_results && typeof data.agent_results === 'object') {
-      // 如果有原始的详细agent_results，优先使用它们
-      agent_results = data.agent_results;
-    } else {
-      // 从agent_signals中构建agent_results结构（降级方案）
-      agent_results = {};
-      
-      // 获取agent_signals数组
-      const agentSignals = data.agent_signals || data.final_decision?.agent_signals || [];
-      
-      if (agentSignals && Array.isArray(agentSignals)) {
-        agentSignals.forEach((signal: any) => {
-          const agentName = signal.agent_name;
-          if (agentName) {
-            // 映射agent名称到前端期望的格式
-            const nameMapping: {[key: string]: string} = {
-              'technical_analysis': 'technical_analyst',
-              'fundamental_analysis': 'fundamentals',
-              'sentiment_analysis': 'sentiment',
-              'valuation_analysis': 'valuation',
-              'risk_management': 'risk_management',
-              'selected_stock_macro_analysis': 'macro_analyst',
-              'market_wide_news_summary(沪深300指数)': 'macro_news',
-              'ashare_policy_impact': 'policy_impact',
-              'liquidity_assessment': 'liquidity',
-              'bull_researcher': 'researcher_bull',
-              'bear_researcher': 'researcher_bear'
-            };
-            
-            const mappedName = nameMapping[agentName] || agentName;
-            agent_results[mappedName] = {
-              signal: signal.signal,
-              confidence: signal.confidence,
-              reasoning: signal.reasoning || getDefaultReasoning(agentName),
-              // 添加额外的字段以支持更详细的显示
-              ...(signal.details && { details: signal.details }),
-              ...(signal.metrics && { metrics: signal.metrics }),
-              ...(signal.risk_score && { risk_score: signal.risk_score }),
-              ...(signal.trading_action && { trading_action: signal.trading_action }),
-              ...(signal.max_position_size && { max_position_size: signal.max_position_size }),
-              ...(signal.risk_metrics && { risk_metrics: signal.risk_metrics })
-            };
-          }
-        });
-      }
-    }
-  }
-  // 优先级2: 从data.result获取（API标准格式）
-  else if (data.result && data.result.agent_results) {
-    analysisData = data.result;
-    agent_results = data.result.agent_results;
-  }
-  // 优先级2.5: 从API响应中的嵌套result获取
-  else if (data.result && data.result.result && data.result.result.agent_results) {
-    analysisData = data.result.result;
-    agent_results = data.result.result.agent_results;
-  }
-  // 优先级2.6: 从标准结构化结果获取 (这是当前实际的格式)
-  else if (data.result && data.result.final_decision && data.result.agent_results) {
-    analysisData = data.result.final_decision;
-    agent_results = data.result.agent_results;
-    
-    // 重新映射agent键名以匹配前端期望
-    const correctedAgentResults: any = {};
-    Object.keys(agent_results).forEach(key => {
-      const mapping: {[key: string]: string} = {
-        'technical_analyst': 'technical_analyst',
-        'fundamentals': 'fundamentals',
-        'sentiment': 'sentiment', 
-        'valuation': 'valuation',
-        'researcher_bull': 'researcher_bull',
-        'researcher_bear': 'researcher_bear',
-        'risk_management': 'risk_management',
-        'macro_analyst': 'macro_analyst',
-        'macro_news': 'macro_news',
-        'portfolio_management': 'portfolio_management',
-        'market_data': 'market_data',
-        'debate_room': 'debate_room'
-      };
-      
-      const mappedKey = mapping[key] || key;
-      correctedAgentResults[mappedKey] = agent_results[key];
-    });
-    
-    agent_results = correctedAgentResults;
-    
-    // 修复bull/bear研究员数据：从agent_signals中获取正确的confidence和signal
-    if (analysisData?.agent_signals && Array.isArray(analysisData.agent_signals)) {
-      analysisData.agent_signals.forEach((signal: any) => {
-        if (signal.agent === 'bull_researcher' && agent_results.researcher_bull) {
-          agent_results.researcher_bull.signal = signal.signal;
-          agent_results.researcher_bull.confidence = signal.confidence;
-          agent_results.researcher_bull.perspective = 'bull';
-        }
-        if (signal.agent === 'bear_researcher' && agent_results.researcher_bear) {
-          agent_results.researcher_bear.signal = signal.signal;
-          agent_results.researcher_bear.confidence = signal.confidence;
-          agent_results.researcher_bear.perspective = 'bear';
-        }
-      });
-    }
-  }
-  // 优先级3: 直接从data获取（直接格式）
-  else if (data.agent_results && !data.action) {
-    analysisData = data;
-    agent_results = data.agent_results;
-  }
-  // 优先级4: 检查是否有嵌套的agent_results（从后端日志看到的格式）
-  else if (data.agent_results && data.agent_results.debate_room) {
-    // 这是从后端传来的完整agent_results格式
-    analysisData = data;
-    
-    // 重新映射agent_results的键名以匹配前端期望
-    const rawResults = data.agent_results;
-    agent_results = {};
-    
-    // 直接映射已知的agent结果
-    const agentMapping: {[key: string]: string} = {
-      'technical_analyst': 'technical_analyst',
-      'fundamentals': 'fundamentals', 
-      'sentiment': 'sentiment',
-      'valuation': 'valuation',
-      'risk_management': 'risk_management',
-      'macro_analyst': 'macro_analyst',
-      'macro_news': 'macro_news',
-      'portfolio_management': 'portfolio_management',
-      'researcher_bear': 'researcher_bear',
-      'researcher_bull': 'researcher_bull',
-      'debate_room': 'debate_room'
-    };
-    
-    Object.keys(rawResults).forEach(key => {
-      const mappedKey = agentMapping[key] || key;
-      agent_results[mappedKey] = rawResults[key];
-    });
-  }
-  
-  // 如果仍然没有找到有效数据，显示错误信息
+  const { analysisData, agentOutputs } = normalizeAnalysisPayload(data);
+  const agent_results = agentOutputs;
+
   if (!agent_results || Object.keys(agent_results).length === 0) {
     return (
       <Alert
-        message="报告数据格式错误"
+        message="鎶ュ憡鏁版嵁鏍煎紡閿欒"
         description={
           <div>
-            <div>分析结果中缺少agent_results字段</div>
+            <div>鍒嗘瀽缁撴灉涓己灏慳gent_results瀛楁</div>
             <div style={{ marginTop: 8, fontSize: '12px' }}>
-              数据结构: {JSON.stringify(Object.keys(data), null, 2)}
+              鏁版嵁缁撴瀯: {JSON.stringify(Object.keys(data), null, 2)}
             </div>
             {(data.final_decision || data.reasoning) && (
               <div style={{ marginTop: 8, fontSize: '12px', maxHeight: '200px', overflow: 'auto', background: '#f5f5f5', padding: '8px', borderRadius: '4px' }}>
-                <strong>原始分析结果:</strong>
+                <strong>鍘熷鍒嗘瀽缁撴灉:</strong>
                 <pre style={{ whiteSpace: 'pre-wrap', fontSize: '11px' }}>
                   {String(data.final_decision || data.reasoning).substring(0, 1000)}...
                 </pre>
@@ -228,7 +64,7 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
   console.log('Final agent_results:', agent_results);
   console.log('Agent results keys:', agent_results ? Object.keys(agent_results) : 'none');
 
-  // 获取信号图标
+  // 鑾峰彇淇″彿鍥炬爣
   const getSignalIcon = (signal: string) => {
     switch (signal?.toLowerCase()) {
       case 'bullish':
@@ -245,7 +81,7 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
     }
   };
 
-  // 获取信号颜色
+  // 鑾峰彇淇″彿棰滆壊
   const getSignalColor = (signal: string) => {
     switch (signal?.toLowerCase()) {
       case 'bullish':
@@ -262,13 +98,13 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
     }
   };
 
-  // 格式化置信度
+  // 鏍煎紡鍖栫疆淇″害
   const formatConfidence = (confidence: any) => {
     if (typeof confidence === 'string') {
       if (confidence.includes('%')) {
         return confidence;
       }
-      // 尝试解析字符串数字
+      // 灏濊瘯瑙ｆ瀽瀛楃涓叉暟瀛?
       const parsed = parseFloat(confidence);
       if (!isNaN(parsed)) {
         return parsed > 1 ? `${parsed.toFixed(1)}%` : `${(parsed * 100).toFixed(1)}%`;
@@ -280,7 +116,7 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
     return confidence || '-';
   };
 
-  // 安全获取数据的函数
+  // 瀹夊叏鑾峰彇鏁版嵁鐨勫嚱鏁?
   const safeGet = (obj: any, path: string[], defaultValue: any = null) => {
     try {
       return path.reduce((current, key) => current && current[key], obj) || defaultValue;
@@ -289,9 +125,50 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
     }
   };
 
+  const getAgentTypeMeta = (agentType: unknown): { label: string; tone: string } => {
+    const normalized = String(agentType || '').trim().toLowerCase();
+    const mapping: Record<string, { label: string; tone: string }> = {
+      rule_engine: { label: 'Rule Engine', tone: 'rule' },
+      quantitative_model: { label: 'Quant Model', tone: 'quant' },
+      statistical_model: { label: 'Stat Model', tone: 'stats' },
+      llm: { label: 'LLM', tone: 'llm' },
+      llm_rag: { label: 'LLM + RAG', tone: 'rag' },
+      hybrid_rule_llm: { label: 'Hybrid Rule + LLM', tone: 'hybrid' },
+    };
+    return mapping[normalized] || { label: normalized || 'untyped', tone: 'default' };
+  };
+
+  const getStructuredPreview = (payload: Record<string, any>): Array<{ key: string; value: string }> => {
+    const source =
+      payload.structured_data && typeof payload.structured_data === 'object' && !Array.isArray(payload.structured_data)
+        ? payload.structured_data
+        : payload;
+
+    const ignore = new Set([
+      'agent_name',
+      'agent_type',
+      'signal',
+      'confidence',
+      'summary',
+      'reasoning',
+      'structured_data',
+    ]);
+
+    return Object.entries(source)
+      .filter(([key, value]) => !ignore.has(key) && value != null)
+      .slice(0, 3)
+      .map(([key, value]) => ({
+        key,
+        value:
+          typeof value === 'object'
+            ? JSON.stringify(value).slice(0, 120)
+            : String(value).slice(0, 120),
+      }));
+  };
+
   return (
     <div style={{ padding: '24px 0' }}>
-      {/* 标题 */}
+      {/* 鏍囬 */}
       <div style={{ textAlign: 'center', marginBottom: '32px' }}>
         <Title level={2} style={{
           margin: 0,
@@ -303,30 +180,82 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
           display: 'inline-block'
         }}>
           <TrophyOutlined style={{ marginRight: 8, color: '#1890ff' }} />
-          股票代码 {
+          鑲＄エ浠ｇ爜 {
             data.ticker || 
             data.result?.ticker || 
             analysisData?.ticker || 
             data.task_id?.split('-')[0] ||
             data.run_id?.split('-')[0] || 
-            // 尝试从agent_signals中提取ticker信息
+            // 灏濊瘯浠巃gent_signals涓彁鍙杢icker淇℃伅
             (data.agent_signals && data.agent_signals.length > 0 && data.agent_signals[0].ticker) ||
-            // 从当前URL或其他来源提取
+            // 浠庡綋鍓峌RL鎴栧叾浠栨潵婧愭彁鍙?
             (window.location.pathname.includes('/analysis/') && window.location.pathname.split('/').pop()) ||
-            '600054'  // 默认使用界面显示的股票代码
-          } 投资分析报告
+            '600054'  // 榛樿浣跨敤鐣岄潰鏄剧ず鐨勮偂绁ㄤ唬鐮?
+          } 鎶曡祫鍒嗘瀽鎶ュ憡
         </Title>
         <div style={{ marginTop: 8, color: '#666', fontSize: '14px' }}>
-          分析区间: {safeGet(agent_results, ['market_data', 'start_date']) || '2024-07-05'} 至 {safeGet(agent_results, ['market_data', 'end_date']) || '2025-07-05'}
+          鍒嗘瀽鍖洪棿: {safeGet(agent_results, ['market_data', 'start_date']) || '2024-07-05'} 鑷?{safeGet(agent_results, ['market_data', 'end_date']) || '2025-07-05'}
         </div>
       </div>
 
-      {/* 技术分析 */}
-      {agent_results.technical_analyst && (
+      {Object.keys(agent_results).length > 0 && (
+        <Card
+          title={<span>Heterogeneous Agent Output Matrix</span>}
+          style={{ marginBottom: '24px' }}
+          bordered
+        >
+          <Row gutter={[12, 12]}>
+            {Object.entries(agent_results).map(([agentKey, payload]) => {
+              const data = (payload || {}) as Record<string, any>;
+              const typeMeta = getAgentTypeMeta(data.agent_type);
+              const preview = getStructuredPreview(data);
+              return (
+                <Col xs={24} md={12} xl={8} key={agentKey}>
+                  <Card size="small">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <Text strong>{agentKey}</Text>
+                      <span className={`hetero-type-pill hetero-type-pill--${typeMeta.tone}`}>
+                        {typeMeta.label}
+                      </span>
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <Tag color={getSignalColor(data.signal)}>
+                        {String(data.signal || 'neutral').toUpperCase()}
+                      </Tag>
+                      <Tag color="blue">{formatConfidence(data.confidence)}</Tag>
+                    </div>
+                    {preview.length > 0 && (
+                      <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+                        {preview.map((item) => (
+                          <div
+                            key={`${agentKey}-${item.key}`}
+                            style={{
+                              padding: '6px 8px',
+                              borderRadius: 8,
+                              background: '#f5f8ff',
+                              border: '1px solid #dbe6ff',
+                            }}
+                          >
+                            <Text type="secondary" style={{ fontSize: 11 }}>{item.key}</Text>
+                            <div style={{ fontSize: 12, marginTop: 2 }}>{item.value}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </Col>
+              );
+            })}
+          </Row>
+        </Card>
+      )}
+
+      {/* Relative valuation (PB percentile) */}
+      {agent_results.technicals && (
         <Card
           title={
             <span>
-              📈 技术分析
+              📊 Relative Valuation (PB Percentile)
             </span>
           }
           style={{ marginBottom: '24px' }}
@@ -334,69 +263,69 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={12}>
-              <Text strong>信号: </Text>
-              {getSignalIcon(agent_results.technical_analyst.signal)}
-              <Tag color={getSignalColor(agent_results.technical_analyst.signal)} style={{ marginLeft: 8 }}>
-                {agent_results.technical_analyst.signal?.toUpperCase() || 'UNKNOWN'}
+              <Text strong>Signal: </Text>
+              {getSignalIcon(agent_results.technicals.signal)}
+              <Tag color={getSignalColor(agent_results.technicals.signal)} style={{ marginLeft: 8 }}>
+                {agent_results.technicals.signal?.toUpperCase() || 'UNKNOWN'}
               </Tag>
             </Col>
             <Col span={12}>
-              <Text strong>置信度: </Text>
+              <Text strong>Confidence: </Text>
               <Tag color="blue">
-                {formatConfidence(agent_results.technical_analyst.confidence)}
+                {formatConfidence(agent_results.technicals.confidence)}
               </Tag>
             </Col>
           </Row>
 
-          {agent_results.technical_analyst.strategy_signals && (
-            <div style={{ marginTop: '16px' }}>
-              <Divider orientation="left" plain>策略信号详情</Divider>
-              <Row gutter={[16, 16]}>
-                {Object.entries(agent_results.technical_analyst.strategy_signals).map(([strategy, data]: [string, any]) => (
-                  <Col span={12} key={strategy}>
-                    <Card size="small" style={{ height: '100%' }}>
-                      <div style={{ marginBottom: 8 }}>
-                        <Text strong>{strategy.replace(/_/g, ' ').toUpperCase()}: </Text>
-                        <Tag color={getSignalColor(data.signal)}>{data.signal}</Tag>
-                      </div>
-                      <div style={{ marginBottom: 8 }}>
-                        <Text type="secondary">置信度: {formatConfidence(data.confidence)}</Text>
-                      </div>
-                      {data.metrics && (
-                        <div style={{ fontSize: '12px', color: '#666' }}>
-                          {Object.entries(data.metrics).slice(0, 3).map(([key, value]: [string, any]) => (
-                            <div key={key}>
-                              {key}: {typeof value === 'number' ? value.toFixed(4) : value}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </Card>
-                  </Col>
-                ))}
-              </Row>
-            </div>
-          )}
+          <div style={{ marginTop: '16px' }}>
+            <Divider orientation="left" plain>PB Percentile Details</Divider>
+            <Row gutter={[16, 16]}>
+              <Col span={12}>
+                <Card size="small">
+                  <Text strong>PB Percentile (5Y): </Text>
+                  <Text>{agent_results.technicals.pb_percentile_5y ?? '-'}</Text>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card size="small">
+                  <Text strong>Current PB: </Text>
+                  <Text>{agent_results.technicals.pb_current ?? '-'}</Text>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card size="small">
+                  <Text strong>Valuation Score: </Text>
+                  <Text>{agent_results.technicals.valuation_score ?? '-'}</Text>
+                </Card>
+              </Col>
+              <Col span={12}>
+                <Card size="small">
+                  <Text strong>Sample Size: </Text>
+                  <Text>{agent_results.technicals.sample_size ?? '-'}</Text>
+                </Card>
+              </Col>
+            </Row>
+          </div>
         </Card>
       )}
 
-      {/* 基本面分析 */}
+      {/* 鍩烘湰闈㈠垎鏋?*/}
       {agent_results.fundamentals && (
         <Card
-          title={<span>📝 基本面分析</span>}
+          title={<span>基本面分析</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={12}>
-              <Text strong>信号: </Text>
+              <Text strong>淇″彿: </Text>
               {getSignalIcon(agent_results.fundamentals.signal)}
               <Tag color={getSignalColor(agent_results.fundamentals.signal)} style={{ marginLeft: 8 }}>
                 {agent_results.fundamentals.signal?.toUpperCase() || 'UNKNOWN'}
               </Tag>
             </Col>
             <Col span={12}>
-              <Text strong>置信度: </Text>
+              <Text strong>缃俊搴? </Text>
               <Tag color="blue">
                 {formatConfidence(agent_results.fundamentals.confidence)}
               </Tag>
@@ -429,23 +358,23 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 情感分析 */}
+      {/* 鎯呮劅鍒嗘瀽 */}
       {agent_results.sentiment && (
         <Card
-          title={<span>🔍 情感分析</span>}
+          title={<span>Market Sentiment (News)</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={12}>
-              <Text strong>信号: </Text>
+              <Text strong>淇″彿: </Text>
               {getSignalIcon(agent_results.sentiment.signal)}
               <Tag color={getSignalColor(agent_results.sentiment.signal)} style={{ marginLeft: 8 }}>
                 {agent_results.sentiment.signal?.toUpperCase() || 'UNKNOWN'}
               </Tag>
             </Col>
             <Col span={12}>
-              <Text strong>置信度: </Text>
+              <Text strong>缃俊搴? </Text>
               <Tag color="blue">
                 {formatConfidence(agent_results.sentiment.confidence)}
               </Tag>
@@ -459,23 +388,23 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 估值分析 */}
+      {/* 浼板€煎垎鏋?*/}
       {agent_results.valuation && (
         <Card
-          title={<span>💰 估值分析</span>}
+          title={<span>Valuation Analysis</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={12}>
-              <Text strong>信号: </Text>
+              <Text strong>淇″彿: </Text>
               {getSignalIcon(agent_results.valuation.signal)}
               <Tag color={getSignalColor(agent_results.valuation.signal)} style={{ marginLeft: 8 }}>
                 {agent_results.valuation.signal?.toUpperCase() || 'UNKNOWN'}
               </Tag>
             </Col>
             <Col span={12}>
-              <Text strong>置信度: </Text>
+              <Text strong>缃俊搴? </Text>
               <Tag color="blue">
                 {formatConfidence(agent_results.valuation.confidence)}
               </Tag>
@@ -508,22 +437,22 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 多方研究分析 */}
+      {/* 澶氭柟鐮旂┒鍒嗘瀽 */}
       {agent_results.researcher_bull && (
         <Card
-          title={<span>🐂 多方研究分析</span>}
+          title={<span>Bull Research Analysis</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={12}>
-              <Text strong>观点: </Text>
+              <Text strong>瑙傜偣: </Text>
               <Tag color="red">
                 <RiseOutlined /> {agent_results.researcher_bull.perspective?.toUpperCase() || agent_results.researcher_bull.signal?.toUpperCase() || 'BULL'}
               </Tag>
             </Col>
             <Col span={12}>
-              <Text strong>置信度: </Text>
+              <Text strong>缃俊搴? </Text>
               <Tag color="blue">
                 {formatConfidence(agent_results.researcher_bull.confidence)}
               </Tag>
@@ -554,22 +483,22 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 空方研究分析 */}
+      {/* 绌烘柟鐮旂┒鍒嗘瀽 */}
       {agent_results.researcher_bear && (
         <Card
-          title={<span>🐻 空方研究分析</span>}
+          title={<span>Bear Research Analysis</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={12}>
-              <Text strong>观点: </Text>
+              <Text strong>瑙傜偣: </Text>
               <Tag color="green">
                 <FallOutlined /> {agent_results.researcher_bear.perspective?.toUpperCase() || agent_results.researcher_bear.signal?.toUpperCase() || 'BEAR'}
               </Tag>
             </Col>
             <Col span={12}>
-              <Text strong>置信度: </Text>
+              <Text strong>缃俊搴? </Text>
               <Tag color="blue">
                 {formatConfidence(agent_results.researcher_bear.confidence)}
               </Tag>
@@ -600,46 +529,46 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 风险管理分析 */}
-      {agent_results.risk_management && (
+      {/* 椋庨櫓绠＄悊鍒嗘瀽 */}
+      {agent_results.risk_manager && (
         <Card
-          title={<span><WarningOutlined /> 风险管理分析</span>}
+          title={<span><WarningOutlined /> Risk Management Analysis</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={8}>
-              <Text strong>风险评分: </Text>
+              <Text strong>椋庨櫓璇勫垎: </Text>
               <Badge 
-                count={agent_results.risk_management.risk_score || 'N/A'} 
+                count={agent_results.risk_manager.risk_score || 'N/A'} 
                 style={{ backgroundColor: '#f50' }} 
               />
               <span style={{ marginLeft: '8px' }}>/10</span>
             </Col>
             <Col span={8}>
-              <Text strong>建议操作: </Text>
-              <Tag color={getSignalColor(agent_results.risk_management.trading_action || agent_results.risk_management.signal)}>
-                {(agent_results.risk_management.trading_action || agent_results.risk_management.signal)?.toUpperCase() || '持有'}
+              <Text strong>寤鸿鎿嶄綔: </Text>
+              <Tag color={getSignalColor(agent_results.risk_manager.trading_action || agent_results.risk_manager.signal)}>
+                {(agent_results.risk_manager.trading_action || agent_results.risk_manager.signal)?.toUpperCase() || '鎸佹湁'}
               </Tag>
             </Col>
             <Col span={8}>
-              <Text strong>最大仓位: </Text>
+              <Text strong>鏈€澶т粨浣? </Text>
               <Text type="secondary">
-                {agent_results.risk_management.max_position_size?.toFixed?.(2) || '未设定'}
+                {agent_results.risk_manager.max_position_size?.toFixed?.(2) || '未设定'}
               </Text>
             </Col>
           </Row>
 
-          {agent_results.risk_management.risk_metrics && (
+          {agent_results.risk_manager.risk_metrics && (
             <div style={{ marginTop: '16px' }}>
               <Divider orientation="left" plain>风险指标</Divider>
               <Row gutter={16}>
                 <Col span={6}>
                   <Card size="small" style={{ textAlign: 'center' }}>
-                    <Paragraph strong style={{ margin: 0, fontSize: '12px' }}>波动率</Paragraph>
+                    <Paragraph style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }}>波动率</Paragraph>
                     <Text style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                      {agent_results.risk_management.risk_metrics?.volatility 
-                        ? (agent_results.risk_management.risk_metrics.volatility * 100).toFixed(2) + '%'
+                      {agent_results.risk_manager.risk_metrics?.volatility 
+                        ? (agent_results.risk_manager.risk_metrics.volatility * 100).toFixed(2) + '%'
                         : 'N/A'}
                     </Text>
                   </Card>
@@ -648,28 +577,28 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
                   <Card size="small" style={{ textAlign: 'center' }}>
                     <Paragraph strong style={{ margin: 0, fontSize: '12px' }}>VaR (95%)</Paragraph>
                     <Text style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                      {agent_results.risk_management.risk_metrics?.value_at_risk_95 
-                        ? (agent_results.risk_management.risk_metrics.value_at_risk_95 * 100).toFixed(2) + '%'
+                      {agent_results.risk_manager.risk_metrics?.value_at_risk_95 
+                        ? (agent_results.risk_manager.risk_metrics.value_at_risk_95 * 100).toFixed(2) + '%'
                         : 'N/A'}
                     </Text>
                   </Card>
                 </Col>
                 <Col span={6}>
                   <Card size="small" style={{ textAlign: 'center' }}>
-                    <Paragraph strong style={{ margin: 0, fontSize: '12px' }}>最大回撤</Paragraph>
+                    <Paragraph style={{ margin: 0, fontSize: '12px', fontWeight: 'bold' }}>最大回撤</Paragraph>
                     <Text style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                      {agent_results.risk_management.risk_metrics?.max_drawdown 
-                        ? (agent_results.risk_management.risk_metrics.max_drawdown * 100).toFixed(2) + '%'
+                      {agent_results.risk_manager.risk_metrics?.max_drawdown 
+                        ? (agent_results.risk_manager.risk_metrics.max_drawdown * 100).toFixed(2) + '%'
                         : 'N/A'}
                     </Text>
                   </Card>
                 </Col>
                 <Col span={6}>
                   <Card size="small" style={{ textAlign: 'center' }}>
-                    <Paragraph strong style={{ margin: 0, fontSize: '12px' }}>市场风险</Paragraph>
+                    <Paragraph strong style={{ margin: 0, fontSize: '12px' }}>甯傚満椋庨櫓</Paragraph>
                     <Text style={{ fontSize: '16px', fontWeight: 'bold' }}>
-                      {agent_results.risk_management.risk_metrics?.market_risk_score 
-                        ? agent_results.risk_management.risk_metrics.market_risk_score + '/10'
+                      {agent_results.risk_manager.risk_metrics?.market_risk_score 
+                        ? agent_results.risk_manager.risk_metrics.market_risk_score + '/10'
                         : 'N/A'}
                     </Text>
                   </Card>
@@ -678,36 +607,36 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
             </div>
           )}
 
-          {agent_results.risk_management.reasoning && (
+          {agent_results.risk_manager.reasoning && (
             <Paragraph style={{ marginTop: '16px', background: '#fff2e8', padding: '12px', borderRadius: '4px', border: '1px solid #ffccc7' }}>
-              {agent_results.risk_management.reasoning}
+              {agent_results.risk_manager.reasoning}
             </Paragraph>
           )}
         </Card>
       )}
 
-      {/* 投资组合管理分析 */}
+      {/* 鎶曡祫缁勫悎绠＄悊鍒嗘瀽 */}
       {(analysisData?.action || data?.final_decision) && (
         <Card
-          title={<span><DollarOutlined /> 投资组合管理分析</span>}
+          title={<span><DollarOutlined /> Portfolio Management Analysis</span>}
           style={{ marginBottom: '24px' }}
           bordered
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={8}>
-              <Text strong>交易行动: </Text>
+              <Text strong>浜ゆ槗琛屽姩: </Text>
               <Tag color={getSignalColor(analysisData?.action || data?.final_decision?.action)} icon={<DollarOutlined />}>
                 {(analysisData?.action || data?.final_decision?.action)?.toUpperCase() || 'UNKNOWN'}
               </Tag>
             </Col>
             <Col span={8}>
-              <Text strong>交易数量: </Text>
+              <Text strong>浜ゆ槗鏁伴噺: </Text>
               <Text type="secondary">
                 {(analysisData?.quantity || data?.final_decision?.quantity || '-')}
               </Text>
             </Col>
             <Col span={8}>
-              <Text strong>决策信心: </Text>
+              <Text strong>鍐崇瓥淇″績: </Text>
               <Tag color="blue">
                 {formatConfidence(analysisData?.confidence || data?.final_decision?.confidence)}
               </Tag>
@@ -734,7 +663,7 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
                         </div>
                       </div>
                       <div style={{ marginTop: 4, fontSize: '12px', color: '#666' }}>
-                        置信度: {formatConfidence(signal.confidence)}
+                        缃俊搴? {formatConfidence(signal.confidence)}
                       </div>
                     </Card>
                   </Col>
@@ -754,13 +683,13 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 最终投资决策摘要 */}
+      {/* 鏈€缁堟姇璧勫喅绛栨憳瑕?*/}
       {analysisData && analysisData.action && (
         <Card
           title={
             <span>
               <TrophyOutlined style={{ color: '#1890ff', marginRight: 8 }} />
-              最终投资决策
+              鏈€缁堟姇璧勫喅绛?
             </span>
           }
           style={{ marginBottom: '24px' }}
@@ -768,19 +697,19 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         >
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={8}>
-              <Text strong>操作建议: </Text>
+              <Text strong>鎿嶄綔寤鸿: </Text>
               {getSignalIcon(analysisData.action)}
               <Tag color={getSignalColor(analysisData.action)} style={{ marginLeft: 8 }}>
-                {analysisData.action === 'buy' ? '买入' : 
-                 analysisData.action === 'sell' ? '卖出' : '持有'}
+                {analysisData.action === 'buy' ? '涔板叆' : 
+                 analysisData.action === 'sell' ? '鍗栧嚭' : '鎸佹湁'}
               </Tag>
             </Col>
             <Col span={8}>
-              <Text strong>交易数量: </Text>
-              <Text type="secondary">{analysisData.quantity || 0} 股</Text>
+              <Text strong>浜ゆ槗鏁伴噺: </Text>
+               <Text type="secondary">{analysisData.quantity || 0} 股</Text>
             </Col>
             <Col span={8}>
-              <Text strong>决策置信度: </Text>
+              <Text strong>鍐崇瓥缃俊搴? </Text>
               <Tag color="blue">
                 {formatConfidence(analysisData.confidence)}
               </Tag>
@@ -798,7 +727,7 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
 
           {analysisData.ashare_considerations && (
             <div style={{ marginTop: '16px' }}>
-              <Divider orientation="left" plain>A股特色考虑</Divider>
+              <Divider orientation="left" plain>A股特性考虑</Divider>
               <div style={{ background: '#e6f7ff', padding: '12px', borderRadius: '4px', border: '1px solid #91d5ff' }}>
                 {typeof analysisData.ashare_considerations === 'string' ? (
                   <Paragraph style={{ margin: 0 }}>
@@ -820,11 +749,11 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
         </Card>
       )}
 
-      {/* 如果没有任何agent结果，显示提示 */}
+      {/* 濡傛灉娌℃湁浠讳綍agent缁撴灉锛屾樉绀烘彁绀?*/}
       {Object.keys(agent_results).length === 0 && (
         <Alert
-          message="暂无分析结果"
-          description="Agent分析结果为空，请检查分析配置或重新运行分析"
+          message="鏆傛棤鍒嗘瀽缁撴灉"
+          description="Agent鍒嗘瀽缁撴灉涓虹┖锛岃妫€鏌ュ垎鏋愰厤缃垨閲嶆柊杩愯鍒嗘瀽"
           type="info"
           showIcon
         />
@@ -834,3 +763,6 @@ const ReportView: React.FC<ReportViewProps> = ({ data }) => {
 };
 
 export default ReportView;
+
+
+

@@ -86,6 +86,7 @@ export interface AnalysisResult {
   reasoning?: string;
   decision_reasoning?: string;
   agent_outputs?: Record<string, AgentMessage>;
+  agent_results?: Record<string, AgentMessage>;
   agent_signals?: Array<Record<string, any>>;
   analyst_signals?: Array<Record<string, any>>;
   [key: string]: any;

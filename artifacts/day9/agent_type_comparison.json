@@ -1,0 +1,23 @@
+{
+  "agent_type_counts": {
+    "unknown": 1,
+    "rule_engine": 3,
+    "quantitative_model": 1,
+    "llm": 5,
+    "statistical_model": 1
+  },
+  "agent_type_map": {
+    "market_data": "unknown",
+    "technicals": "rule_engine",
+    "sentiment": "rule_engine",
+    "valuation": "quantitative_model",
+    "macro_news_agent": "llm",
+    "fundamentals": "rule_engine",
+    "researcher_bull": "llm",
+    "researcher_bear": "llm",
+    "debate_room": "llm",
+    "risk_manager": "statistical_model",
+    "macro_analyst": "llm"
+  },
+  "sample_ticker": "600519"
+}

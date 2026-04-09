@@ -3,16 +3,52 @@ param(
     [string]$BindHost = "127.0.0.1",
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
-    [int]$AutoStopSeconds = 0
+    [int]$AutoStopSeconds = 0,
+    [switch]$ForceFreePorts
 )
 
 $ErrorActionPreference = "Stop"
 
-function Test-PortFree {
+function Get-PortOwners {
     param([int]$Port)
-    $conn = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
-    if ($conn) {
-        throw "Port $Port is already in use. Please free it and retry."
+    $connections = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue
+    if (-not $connections) {
+        return @()
+    }
+
+    return @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+}
+
+function Ensure-PortAvailable {
+    param(
+        [int]$Port,
+        [switch]$ForceFree
+    )
+
+    $owners = Get-PortOwners -Port $Port
+    if (-not $owners -or $owners.Count -eq 0) {
+        return
+    }
+
+    if (-not $ForceFree) {
+        throw "Port $Port is already in use. Rerun with -ForceFreePorts to auto-release it."
+    }
+
+    Write-Host "Port $Port is in use by PID(s): $($owners -join ', '). Releasing..."
+    foreach ($pid in $owners) {
+        try {
+            Stop-Process -Id $pid -Force -ErrorAction Stop
+        }
+        catch {
+            throw "Failed to stop PID $pid on port ${Port}: $($_.Exception.Message)"
+        }
+    }
+
+    Start-Sleep -Seconds 1
+
+    $remaining = Get-PortOwners -Port $Port
+    if ($remaining -and $remaining.Count -gt 0) {
+        throw "Port $Port is still occupied by PID(s): $($remaining -join ', ')."
     }
 }
 
@@ -51,8 +87,8 @@ if (-not (Test-Path $frontendDir)) {
 }
 
 Ensure-Command "npm.cmd"
-Test-PortFree -Port $BackendPort
-Test-PortFree -Port $FrontendPort
+Ensure-PortAvailable -Port $BackendPort -ForceFree:$ForceFreePorts
+Ensure-PortAvailable -Port $FrontendPort -ForceFree:$ForceFreePorts
 
 $backendProc = $null
 $frontendProc = $null

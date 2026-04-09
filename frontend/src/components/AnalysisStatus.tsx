@@ -17,7 +17,30 @@ interface AgentInsight {
   summary?: string;
   execution_time_ms?: number;
   token_usage?: number | string | Record<string, any>;
+  structured_entries?: Array<{ key: string; value: string }>;
 }
+
+type AgentTypeMeta = {
+  label: string;
+  tone: string;
+};
+
+const AGENT_TYPE_META: Record<string, AgentTypeMeta> = {
+  rule_engine: { label: 'Rule Engine', tone: 'rule' },
+  quantitative_model: { label: 'Quant Model', tone: 'quant' },
+  statistical_model: { label: 'Stat Model', tone: 'stats' },
+  llm: { label: 'LLM', tone: 'llm' },
+  llm_rag: { label: 'LLM + RAG', tone: 'rag' },
+  hybrid_rule_llm: { label: 'Hybrid Rule + LLM', tone: 'hybrid' },
+};
+
+const getAgentTypeMeta = (agentType?: string): AgentTypeMeta => {
+  const normalized = String(agentType || '').trim().toLowerCase();
+  return AGENT_TYPE_META[normalized] || {
+    label: normalized || 'untyped',
+    tone: 'default',
+  };
+};
 
 const normalizeConfidence = (value: unknown): number | null => {
   if (typeof value === 'number') {
@@ -65,6 +88,51 @@ const formatTokenUsage = (value: unknown): string => {
   return '-';
 };
 
+const toStructuredEntries = (payload: Record<string, any>): Array<{ key: string; value: string }> => {
+  const preferred = payload.structured_data;
+  const source =
+    preferred && typeof preferred === 'object' && !Array.isArray(preferred)
+      ? (preferred as Record<string, any>)
+      : payload;
+
+  const ignoredKeys = new Set([
+    'agent_name',
+    'agent_type',
+    'signal',
+    'confidence',
+    'summary',
+    'reasoning',
+    'execution_time_ms',
+    'token_usage',
+    'structured_data',
+  ]);
+
+  const entries: Array<{ key: string; value: string }> = [];
+
+  Object.entries(source).forEach(([key, value]) => {
+    if (ignoredKeys.has(key) || value == null) {
+      return;
+    }
+
+    if (typeof value === 'object') {
+      const compact = JSON.stringify(value);
+      entries.push({
+        key,
+        value: compact.length > 120 ? `${compact.slice(0, 120)}...` : compact,
+      });
+      return;
+    }
+
+    const text = String(value);
+    entries.push({
+      key,
+      value: text.length > 120 ? `${text.slice(0, 120)}...` : text,
+    });
+  });
+
+  return entries.slice(0, 4);
+};
+
 const extractAgentInsights = (result: any): AgentInsight[] => {
   if (!result || typeof result !== 'object') {
     return [];
@@ -81,6 +149,7 @@ const extractAgentInsights = (result: any): AgentInsight[] => {
         summary: data.summary || data.reasoning,
         execution_time_ms: data.execution_time_ms,
         token_usage: data.token_usage,
+        structured_entries: toStructuredEntries(data),
       };
     });
   }
@@ -95,6 +164,7 @@ const extractAgentInsights = (result: any): AgentInsight[] => {
       summary: item.reasoning || item.summary,
       execution_time_ms: item.execution_time_ms,
       token_usage: item.token_usage,
+      structured_entries: [],
     }));
   }
 
@@ -260,8 +330,8 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
                       <div className="agent-node-head">
                         <div>
                           <h4 className="agent-node-name">{item.agent_name}</h4>
-                          <span className="agent-node-type">
-                            {item.agent_type || 'analysis'}
+                          <span className={`hetero-type-pill hetero-type-pill--${getAgentTypeMeta(item.agent_type).tone}`}>
+                            {getAgentTypeMeta(item.agent_type).label}
                           </span>
                         </div>
                         <span className={`agent-signal-badge agent-signal-${signal}`}>
@@ -271,6 +341,19 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
                       <p className="agent-node-summary">
                         {item.summary || '该 Agent 已完成当前轮分析，等待联合决策汇总。'}
                       </p>
+                      {item.structured_entries && item.structured_entries.length > 0 && (
+                        <div className="agent-node-structured">
+                          {item.structured_entries.map((entry) => (
+                            <div
+                              className="agent-node-structured-item"
+                              key={`${item.agent_name}-${entry.key}`}
+                            >
+                              <span className="agent-node-structured-key">{entry.key}</span>
+                              <span className="agent-node-structured-value">{entry.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       <div className="agent-node-meta">
                         <span>{confidenceValue != null ? `置信度 ${confidenceValue}%` : '置信度 --'}</span>
                         <span>

@@ -1,0 +1,382 @@
+[
+  {
+    "ticker": "600519",
+    "run_id": "37c7a354-f1f2-4645-b0d7-81e29a6233ef",
+    "ablation_profile": "full_heterogeneous",
+    "runtime_sec": 0.055,
+    "success": true,
+    "final_action": "hold",
+    "final_quantity": 0,
+    "final_confidence": 0.7,
+    "agent_outputs_count": 11,
+    "agent_outputs_keys": [
+      "debate_room",
+      "fundamentals",
+      "macro_analyst",
+      "macro_news_agent",
+      "market_data",
+      "researcher_bear",
+      "researcher_bull",
+      "risk_manager",
+      "sentiment",
+      "technicals",
+      "valuation"
+    ],
+    "missing_agent_outputs_keys": [],
+    "rag_sample": {
+      "ticker": "600519",
+      "analysis_date": "2025-03-31",
+      "memory_scope": {
+        "mode": "sqlite_first",
+        "channel": "fundamentals_memory",
+        "stock_code": "600519",
+        "hard_filter": "stock_code_exact",
+        "limit": 3,
+        "retrieved_count": 3,
+        "status": "ok"
+      },
+      "memory_delta": {
+        "status": "ok",
+        "changed": false,
+        "change_type": "stable",
+        "previous_signal": "bearish",
+        "current_signal": "bearish",
+        "previous_confidence": "100%",
+        "current_confidence": "100%",
+        "confidence_delta_points": 0.0,
+        "latest_ref_date": "2025-03-31",
+        "summary": "Signal remained bearish versus latest memory (2025-03-31)."
+      },
+      "retrieved_refs_sample": [
+        {
+          "id": 116,
+          "stock_code": "600519",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:17:21.400858"
+        },
+        {
+          "id": 102,
+          "stock_code": "600519",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:12:47.972062"
+        },
+        {
+          "id": 85,
+          "stock_code": "600519",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:11:06.113533"
+        }
+      ]
+    }
+  },
+  {
+    "ticker": "000333",
+    "run_id": "f688d62e-c2ef-4c6a-b274-691d003c4e7b",
+    "ablation_profile": "full_heterogeneous",
+    "runtime_sec": 0.027,
+    "success": true,
+    "final_action": "hold",
+    "final_quantity": 0,
+    "final_confidence": 0.7,
+    "agent_outputs_count": 11,
+    "agent_outputs_keys": [
+      "debate_room",
+      "fundamentals",
+      "macro_analyst",
+      "macro_news_agent",
+      "market_data",
+      "researcher_bear",
+      "researcher_bull",
+      "risk_manager",
+      "sentiment",
+      "technicals",
+      "valuation"
+    ],
+    "missing_agent_outputs_keys": [],
+    "rag_sample": {
+      "ticker": "000333",
+      "analysis_date": "2025-03-31",
+      "memory_scope": {
+        "mode": "sqlite_first",
+        "channel": "fundamentals_memory",
+        "stock_code": "000333",
+        "hard_filter": "stock_code_exact",
+        "limit": 3,
+        "retrieved_count": 3,
+        "status": "ok"
+      },
+      "memory_delta": {
+        "status": "ok",
+        "changed": false,
+        "change_type": "stable",
+        "previous_signal": "bearish",
+        "current_signal": "bearish",
+        "previous_confidence": "100%",
+        "current_confidence": "100%",
+        "confidence_delta_points": 0.0,
+        "latest_ref_date": "2025-03-31",
+        "summary": "Signal remained bearish versus latest memory (2025-03-31)."
+      },
+      "retrieved_refs_sample": [
+        {
+          "id": 86,
+          "stock_code": "000333",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:11:07.941474"
+        },
+        {
+          "id": 40,
+          "stock_code": "000333",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:04:06.590972"
+        },
+        {
+          "id": 25,
+          "stock_code": "000333",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T13:25:14.010164"
+        }
+      ]
+    }
+  },
+  {
+    "ticker": "601398",
+    "run_id": "acfdbaf4-596f-4681-b599-de41b20e47f1",
+    "ablation_profile": "full_heterogeneous",
+    "runtime_sec": 0.025,
+    "success": true,
+    "final_action": "hold",
+    "final_quantity": 0,
+    "final_confidence": 0.7,
+    "agent_outputs_count": 11,
+    "agent_outputs_keys": [
+      "debate_room",
+      "fundamentals",
+      "macro_analyst",
+      "macro_news_agent",
+      "market_data",
+      "researcher_bear",
+      "researcher_bull",
+      "risk_manager",
+      "sentiment",
+      "technicals",
+      "valuation"
+    ],
+    "missing_agent_outputs_keys": [],
+    "rag_sample": {
+      "ticker": "601398",
+      "analysis_date": "2025-03-31",
+      "memory_scope": {
+        "mode": "sqlite_first",
+        "channel": "fundamentals_memory",
+        "stock_code": "601398",
+        "hard_filter": "stock_code_exact",
+        "limit": 3,
+        "retrieved_count": 3,
+        "status": "ok"
+      },
+      "memory_delta": {
+        "status": "ok",
+        "changed": false,
+        "change_type": "stable",
+        "previous_signal": "bearish",
+        "current_signal": "bearish",
+        "previous_confidence": "100%",
+        "current_confidence": "100%",
+        "confidence_delta_points": 0.0,
+        "latest_ref_date": "2025-03-31",
+        "summary": "Signal remained bearish versus latest memory (2025-03-31)."
+      },
+      "retrieved_refs_sample": [
+        {
+          "id": 87,
+          "stock_code": "601398",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:11:07.976855"
+        },
+        {
+          "id": 41,
+          "stock_code": "601398",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:04:06.622889"
+        },
+        {
+          "id": 26,
+          "stock_code": "601398",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T13:25:14.034300"
+        }
+      ]
+    }
+  },
+  {
+    "ticker": "002415",
+    "run_id": "6926909d-a338-46aa-a2d7-944212e0926c",
+    "ablation_profile": "full_heterogeneous",
+    "runtime_sec": 0.028,
+    "success": true,
+    "final_action": "hold",
+    "final_quantity": 0,
+    "final_confidence": 0.7,
+    "agent_outputs_count": 11,
+    "agent_outputs_keys": [
+      "debate_room",
+      "fundamentals",
+      "macro_analyst",
+      "macro_news_agent",
+      "market_data",
+      "researcher_bear",
+      "researcher_bull",
+      "risk_manager",
+      "sentiment",
+      "technicals",
+      "valuation"
+    ],
+    "missing_agent_outputs_keys": [],
+    "rag_sample": {
+      "ticker": "002415",
+      "analysis_date": "2025-03-31",
+      "memory_scope": {
+        "mode": "sqlite_first",
+        "channel": "fundamentals_memory",
+        "stock_code": "002415",
+        "hard_filter": "stock_code_exact",
+        "limit": 3,
+        "retrieved_count": 3,
+        "status": "ok"
+      },
+      "memory_delta": {
+        "status": "ok",
+        "changed": false,
+        "change_type": "stable",
+        "previous_signal": "bearish",
+        "current_signal": "bearish",
+        "previous_confidence": "100%",
+        "current_confidence": "100%",
+        "confidence_delta_points": 0.0,
+        "latest_ref_date": "2025-03-31",
+        "summary": "Signal remained bearish versus latest memory (2025-03-31)."
+      },
+      "retrieved_refs_sample": [
+        {
+          "id": 88,
+          "stock_code": "002415",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:11:08.015985"
+        },
+        {
+          "id": 42,
+          "stock_code": "002415",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:04:06.657049"
+        },
+        {
+          "id": 27,
+          "stock_code": "002415",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T13:25:14.056985"
+        }
+      ]
+    }
+  },
+  {
+    "ticker": "601857",
+    "run_id": "980d0277-607c-4e4a-8473-e6633a27b0d0",
+    "ablation_profile": "full_heterogeneous",
+    "runtime_sec": 0.026,
+    "success": true,
+    "final_action": "hold",
+    "final_quantity": 0,
+    "final_confidence": 0.7,
+    "agent_outputs_count": 11,
+    "agent_outputs_keys": [
+      "debate_room",
+      "fundamentals",
+      "macro_analyst",
+      "macro_news_agent",
+      "market_data",
+      "researcher_bear",
+      "researcher_bull",
+      "risk_manager",
+      "sentiment",
+      "technicals",
+      "valuation"
+    ],
+    "missing_agent_outputs_keys": [],
+    "rag_sample": {
+      "ticker": "601857",
+      "analysis_date": "2025-03-31",
+      "memory_scope": {
+        "mode": "sqlite_first",
+        "channel": "fundamentals_memory",
+        "stock_code": "601857",
+        "hard_filter": "stock_code_exact",
+        "limit": 3,
+        "retrieved_count": 3,
+        "status": "ok"
+      },
+      "memory_delta": {
+        "status": "ok",
+        "changed": false,
+        "change_type": "stable",
+        "previous_signal": "bearish",
+        "current_signal": "bearish",
+        "previous_confidence": "100%",
+        "current_confidence": "100%",
+        "confidence_delta_points": 0.0,
+        "latest_ref_date": "2025-03-31",
+        "summary": "Signal remained bearish versus latest memory (2025-03-31)."
+      },
+      "retrieved_refs_sample": [
+        {
+          "id": 89,
+          "stock_code": "601857",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:11:08.052765"
+        },
+        {
+          "id": 43,
+          "stock_code": "601857",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T14:04:06.690326"
+        },
+        {
+          "id": 28,
+          "stock_code": "601857",
+          "analysis_date": "2025-03-31",
+          "signal": "bearish",
+          "confidence": "100%",
+          "created_at": "2026-04-09T13:25:14.078101"
+        }
+      ]
+    }
+  }
+]

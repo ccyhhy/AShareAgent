@@ -1,266 +1,299 @@
+﻿from __future__ import annotations
+
+import ast
+import json
+import logging
+import os
+from typing import Any
+
 from langchain_core.messages import HumanMessage
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
+
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
 from src.tools.openrouter_config import get_chat_completion
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
-import json
-import ast
-import logging
 
-# 获取日志记录器
-logger = logging.getLogger('debate_room')
+logger = logging.getLogger("debate_room")
 
 
-@agent_endpoint("debate_room", "辩论室，分析多空双方观点，得出平衡的投资结论")
+def _is_backtest_mode() -> bool:
+    value = os.getenv("ASHAREAGENT_BACKTEST_MODE")
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_payload(content: Any) -> dict[str, Any]:
+    if not isinstance(content, str):
+        return {}
+    try:
+        parsed = json.loads(content)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        try:
+            parsed = ast.literal_eval(content)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+
+def _to_confidence(value: Any) -> float:
+    try:
+        score = float(value)
+    except Exception:
+        return 0.5
+    return max(0.0, min(score, 1.0))
+
+
+def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
+@agent_endpoint("debate_room", "Debate room that balances bull and bear researcher views")
 def debate_room_agent(state: AgentState):
-    """Facilitates debate between bull and bear researchers to reach a balanced conclusion."""
+    """Facilitate structured bull-vs-bear debate and output a balanced signal."""
     show_workflow_status("Debate Room")
     show_reasoning = state["metadata"]["show_reasoning"]
-    logger.info("开始分析研究员观点并进行辩论...")
 
-    # 收集所有研究员信息 - 向前兼容设计（添加防御性检查）
-    researcher_messages = {}
-    for msg in state["messages"]:
-        # 添加防御性检查，确保 msg 和 msg.name 不为 None
-        if msg is None:
-            continue
-        if not hasattr(msg, 'name') or msg.name is None:
-            continue
-        if isinstance(msg.name, str) and msg.name.startswith("researcher_"):
-            researcher_messages[msg.name] = msg
-            logger.debug(f"收集到研究员信息: {msg.name}")
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="debate_room",
+        agent_type="llm",
+        message_name="debate_room_agent",
+        output_key="debate_room",
+        data_key="debate_analysis",
+        payload_overrides={
+            "bull_confidence": 0.5,
+            "bear_confidence": 0.5,
+            "confidence_diff": 0.0,
+            "adjusted_confidence_diff": 0.0,
+            "llm_score": 0.0,
+            "llm_analysis": "Ablation disabled debate_room agent.",
+            "llm_reasoning": "Neutral deterministic fallback.",
+            "mixed_confidence_diff": 0.0,
+            "debate_summary": ["Ablation disabled debate room debate synthesis."],
+            "ashare_factors": {
+                "policy_sensitivity": False,
+                "liquidity_concerns": False,
+                "volatility_level": 0.0,
+                "adaptive_threshold": 0.1,
+                "adjustments_applied": {
+                    "policy_factor": 0.0,
+                    "liquidity_factor": 0.0,
+                    "volatility_factor": 0.0,
+                    "sentiment_extreme": 0.0,
+                },
+            },
+            "decision_quality": {
+                "consensus_strength": 1.0,
+                "argument_balance": 1.0,
+                "llm_agreement": 1.0,
+            },
+        },
+        data_updates={
+            "ashare_debate_metrics": {
+                "volatility_level": 0.0,
+                "policy_sensitivity": False,
+                "decision_confidence": 0.5,
+                "consensus_quality": 1.0,
+            }
+        },
+    )
+    if ablation_result is not None:
+        ablation_result["metadata"].update(
+            {
+                "debate_enhanced": True,
+                "adaptive_threshold": 0.1,
+                "special_conditions": {
+                    "policy_sensitive": False,
+                    "high_volatility": False,
+                    "extreme_sentiment": False,
+                    "liquidity_concern": False,
+                },
+            }
+        )
+        return ablation_result
 
-    # 确保至少有看多和看空两个研究员
+    researcher_aliases = {
+        "researcher_bull_agent": "researcher_bull",
+        "researcher_bear_agent": "researcher_bear",
+    }
+
+    researcher_messages: dict[str, HumanMessage] = {}
+    for msg in state.get("messages", []):
+        if msg is None or not hasattr(msg, "name"):
+            continue
+        msg_name = getattr(msg, "name", None)
+        if not isinstance(msg_name, str) or not msg_name.startswith("researcher_"):
+            continue
+        canonical_name = researcher_aliases.get(msg_name, msg_name)
+        researcher_messages[canonical_name] = msg
+
     if "researcher_bull" not in researcher_messages or "researcher_bear" not in researcher_messages:
-        logger.error(
-            "缺少必要的研究员数据: researcher_bull 或 researcher_bear")
-        raise ValueError(
-            "Missing required researcher_bull or researcher_bear messages")
+        raise ValueError("Missing required researcher_bull or researcher_bear messages")
 
-    # 处理研究员数据
-    researcher_data = {}
-    for name, msg in researcher_messages.items():
-        # 添加防御性检查，确保 msg.content 不为 None
-        if not hasattr(msg, 'content') or msg.content is None:
-            logger.warning(f"研究员 {name} 的消息内容为空")
-            continue
-        try:
-            data = json.loads(msg.content)
-            logger.debug(f"成功解析 {name} 的 JSON 内容")
-        except (json.JSONDecodeError, TypeError):
-            try:
-                data = ast.literal_eval(msg.content)
-                logger.debug(f"通过 ast.literal_eval 解析 {name} 的内容")
-            except (ValueError, SyntaxError, TypeError):
-                # 如果无法解析内容，跳过此消息
-                logger.warning(f"无法解析 {name} 的消息内容，已跳过")
-                continue
-        researcher_data[name] = data
+    bull_thesis = _parse_payload(researcher_messages["researcher_bull"].content)
+    bear_thesis = _parse_payload(researcher_messages["researcher_bear"].content)
 
-    # 获取看多和看空研究员数据（为了兼容原有逻辑）
-    if "researcher_bull" not in researcher_data or "researcher_bear" not in researcher_data:
-        logger.error("无法解析必要的研究员数据")
-        raise ValueError(
-            "Could not parse required researcher_bull or researcher_bear messages")
+    if not bull_thesis or not bear_thesis:
+        raise ValueError("Could not parse required researcher_bull or researcher_bear messages")
 
-    bull_thesis = researcher_data["researcher_bull"]
-    bear_thesis = researcher_data["researcher_bear"]
-    logger.info(
-        f"已获取看多观点(置信度: {bull_thesis.get('confidence', 0)})和看空观点(置信度: {bear_thesis.get('confidence', 0)})")
+    bull_confidence = _to_confidence(bull_thesis.get("confidence", 0.5))
+    bear_confidence = _to_confidence(bear_thesis.get("confidence", 0.5))
 
-    # 比较置信度级别
-    bull_confidence = bull_thesis.get("confidence", 0)
-    bear_confidence = bear_thesis.get("confidence", 0)
+    bull_points = [str(p) for p in bull_thesis.get("thesis_points", []) if str(p).strip()]
+    bear_points = [str(p) for p in bear_thesis.get("thesis_points", []) if str(p).strip()]
 
-    # 分析辩论观点
-    debate_summary = []
-    debate_summary.append("Bullish Arguments:")
-    for point in bull_thesis.get("thesis_points", []):
-        debate_summary.append(f"+ {point}")
-
+    debate_summary = ["Bullish Arguments:"]
+    debate_summary.extend([f"+ {point}" for point in bull_points])
     debate_summary.append("\nBearish Arguments:")
-    for point in bear_thesis.get("thesis_points", []):
-        debate_summary.append(f"- {point}")
+    debate_summary.extend([f"- {point}" for point in bear_points])
 
-    # 收集所有研究员的论点，准备发给 LLM
-    all_perspectives = {}
-    for name, data in researcher_data.items():
-        perspective = data.get("perspective", name.replace(
-            "researcher_", "").replace("_agent", ""))
-        all_perspectives[perspective] = {
-            "confidence": data.get("confidence", 0),
-            "thesis_points": data.get("thesis_points", [])
+    llm_analysis: dict[str, Any] | None = None
+    llm_score = 0.0
+
+    if _is_backtest_mode():
+        llm_analysis = {
+            "analysis": "Backtest mode active. Third-party LLM debate scoring skipped.",
+            "score": 0.0,
+            "reasoning": "Deterministic fallback for reproducibility.",
         }
-
-    logger.info(f"准备让 LLM 分析 {len(all_perspectives)} 个研究员的观点")
-
-    # 构建发送给 LLM 的提示
-    llm_prompt = """
-你是一位专业的金融分析师，请分析以下投资研究员的观点，并给出你的第三方分析:
-
-"""
-    for perspective, data in all_perspectives.items():
-        llm_prompt += f"\n{perspective.upper()} 观点 (置信度: {data['confidence']}):\n"
-        for point in data["thesis_points"]:
-            llm_prompt += f"- {point}\n"
-
-    llm_prompt += """
-请提供以下格式的 JSON 回复:
-{
-    "analysis": "你的详细分析，评估各方观点的优劣，并指出你认为最有说服力的论点",
-    "score": 0.5,  // 你的评分，从 -1.0(极度看空) 到 1.0(极度看多)，0 表示中性
-    "reasoning": "你给出这个评分的简要理由"
-}
-
-务必确保你的回复是有效的 JSON 格式，且包含上述所有字段。回复必须使用英文，不要使用中文或其他语言。
-"""
-
-    # 调用 LLM 获取第三方观点
-    llm_response = None
-    llm_analysis = None
-    llm_score = 0  # 默认为中性
-    try:
-        logger.info("开始调用 LLM 获取第三方分析...")
+    else:
+        prompt_parts = [
+            "Analyze the following bull and bear theses and return JSON with fields analysis, score, reasoning.",
+            f"BULL confidence={bull_confidence}: {bull_points}",
+            f"BEAR confidence={bear_confidence}: {bear_points}",
+        ]
         messages = [
-            {"role": "system", "content": "You are a professional financial analyst. Please provide your analysis in English only, not in Chinese or any other language."},
-            {"role": "user", "content": llm_prompt}
+            {
+                "role": "system",
+                "content": "You are a professional financial analyst. Reply in valid JSON only.",
+            },
+            {"role": "user", "content": "\n".join(prompt_parts)},
         ]
 
-        # 使用log_llm_interaction装饰器记录LLM交互
-        llm_response = log_llm_interaction(state)(
-            lambda: get_chat_completion(messages)
-        )()
+        try:
+            llm_response = log_llm_interaction(state)(lambda: get_chat_completion(messages))()
+            if llm_response:
+                start = llm_response.find("{")
+                end = llm_response.rfind("}") + 1
+                if start >= 0 and end > start:
+                    parsed = json.loads(llm_response[start:end])
+                    if isinstance(parsed, dict):
+                        llm_analysis = parsed
+                        llm_score = max(-1.0, min(1.0, float(parsed.get("score", 0.0))))
+        except Exception as exc:
+            logger.error("LLM call failed in debate_room_agent: %s", exc)
+            llm_analysis = {
+                "analysis": "LLM API call failed",
+                "score": 0.0,
+                "reasoning": "API error",
+            }
 
-        logger.info("LLM 返回响应完成")
+    if llm_analysis is None:
+        llm_analysis = {
+            "analysis": "No valid LLM analysis returned",
+            "score": 0.0,
+            "reasoning": "Fallback",
+        }
 
-        # 解析 LLM 返回的 JSON
-        if llm_response:
-            try:
-                # 尝试提取 JSON 部分
-                json_start = llm_response.find('{')
-                json_end = llm_response.rfind('}') + 1
-                if json_start >= 0 and json_end > json_start:
-                    json_str = llm_response[json_start:json_end]
-                    llm_analysis = json.loads(json_str)
-                    llm_score = float(llm_analysis.get("score", 0))
-                    # 确保分数在有效范围内
-                    llm_score = max(min(llm_score, 1.0), -1.0)
-                    logger.info(f"成功解析 LLM 回复，评分: {llm_score}")
-                    logger.debug(
-                        f"LLM 分析内容: {llm_analysis.get('analysis', '未提供分析')[:100]}...")
-            except Exception as e:
-                # 如果解析失败，记录错误并使用默认值
-                logger.error(f"解析 LLM 回复失败: {e}")
-                llm_analysis = {"analysis": "Failed to parse LLM response",
-                                "score": 0, "reasoning": "Parsing error"}
-    except Exception as e:
-        logger.error(f"调用 LLM 失败: {e}")
-        llm_analysis = {"analysis": "LLM API call failed",
-                        "score": 0, "reasoning": "API error"}
-
-    # Enhanced A-share specific confidence calculation
     confidence_diff = bull_confidence - bear_confidence
-    
-    # A股特色因素调整
+
+    bull_reasoning = str(bull_thesis.get("reasoning", ""))
+    bear_reasoning = str(bear_thesis.get("reasoning", ""))
+
     ashare_adjustments = {
-        'policy_factor': 0.0,
-        'liquidity_factor': 0.0, 
-        'volatility_factor': 0.0,
-        'sentiment_extreme': 0.0
+        "policy_factor": 0.0,
+        "liquidity_factor": 0.0,
+        "volatility_factor": 0.0,
+        "sentiment_extreme": 0.0,
     }
-    
-    # 检查政策敏感性
-    bull_reasoning = str(bull_thesis.get('reasoning', ''))
-    bear_reasoning = str(bear_thesis.get('reasoning', ''))
-    
-    if 'policy' in bull_reasoning.lower() or 'policy' in bear_reasoning.lower():
-        ashare_adjustments['policy_factor'] = 0.1 if bull_confidence > bear_confidence else -0.1
-        
-    # 检查流动性风险
-    if 'liquidity' in bear_reasoning.lower():
-        ashare_adjustments['liquidity_factor'] = -0.05
-        
-    # 检查情绪极端情况
+
+    if "policy" in bull_reasoning.lower() or "policy" in bear_reasoning.lower():
+        ashare_adjustments["policy_factor"] = 0.1 if bull_confidence > bear_confidence else -0.1
+
+    if "liquidity" in bear_reasoning.lower():
+        ashare_adjustments["liquidity_factor"] = -0.05
+
     if abs(confidence_diff) > 0.7:
-        ashare_adjustments['sentiment_extreme'] = -0.1 * abs(confidence_diff)
-    
-    # 应用A股调整
+        ashare_adjustments["sentiment_extreme"] = -0.1 * abs(confidence_diff)
+
     total_adjustment = sum(ashare_adjustments.values())
     adjusted_confidence_diff = confidence_diff + total_adjustment
-    
-    # 增加LLM权重以更好处理A股复杂性
-    llm_weight = 0.4
-    
-    # 综合计算，结合调整后的置信度和LLM分析
-    mixed_confidence_diff = (1 - llm_weight) * adjusted_confidence_diff + llm_weight * llm_score
-    
-    logger.info(
-        f"A股特色调整: 原始差异={confidence_diff:.3f}, 调整后={adjusted_confidence_diff:.3f}, LLM评分={llm_score:.3f}, 最终差异={mixed_confidence_diff:.3f}")
-    logger.info(f"A股调整因素: {ashare_adjustments}")
 
-    # A股特色决策逻辑优化
-    market_volatility = abs(bull_confidence - bear_confidence)
-    adaptive_threshold = 0.1 + min(market_volatility * 0.1, 0.05)  # 动態阈值
-    
-    # 特殊情况检查
+    llm_weight = 0.4
+    mixed_confidence_diff = (1 - llm_weight) * adjusted_confidence_diff + llm_weight * llm_score
+
+    market_volatility = abs(confidence_diff)
+    adaptive_threshold = 0.1 + min(market_volatility * 0.1, 0.05)
+
     special_conditions = {
-        'policy_sensitive': ashare_adjustments['policy_factor'] != 0,
-        'high_volatility': market_volatility > 0.6,
-        'extreme_sentiment': abs(adjusted_confidence_diff) > 0.8,
-        'liquidity_concern': ashare_adjustments['liquidity_factor'] < 0
+        "policy_sensitive": ashare_adjustments["policy_factor"] != 0,
+        "high_volatility": market_volatility > 0.6,
+        "extreme_sentiment": abs(adjusted_confidence_diff) > 0.8,
+        "liquidity_concern": ashare_adjustments["liquidity_factor"] < 0,
     }
-    
-    # 决策逻辑优化
+
     if abs(mixed_confidence_diff) < adaptive_threshold:
         final_signal = "neutral"
-        reasoning = f"A股辩论均衡，双方论点都有合理性。阈值: {adaptive_threshold:.3f}"
         confidence = max(bull_confidence, bear_confidence)
+        reasoning = f"Balanced debate; both sides have merit. threshold={adaptive_threshold:.3f}"
     elif mixed_confidence_diff > 0:
-        confidence_level = "强烈" if mixed_confidence_diff > 0.5 else "温和"
         final_signal = "bullish"
-        reasoning = f"{confidence_level}看多信号，多头论点更有说服力。评分: {mixed_confidence_diff:.3f}"
         confidence = bull_confidence
+        reasoning = f"Bullish tilt after debate. score={mixed_confidence_diff:.3f}"
     else:
-        risk_level = "高风险" if mixed_confidence_diff < -0.5 else "中等风险"
         final_signal = "bearish"
-        reasoning = f"{risk_level}看空信号，空头论点更有说服力。评分: {mixed_confidence_diff:.3f}"
         confidence = bear_confidence
-    
-    # 特殊情况调整
-    if special_conditions['policy_sensitive']:
-        reasoning += " ❗政策敏感性高"
-    if special_conditions['liquidity_concern']:
-        reasoning += " ⚠️流动性风险"
-    if special_conditions['high_volatility']:
-        reasoning += " 📈波动性较大"
+        reasoning = f"Bearish tilt after debate. score={mixed_confidence_diff:.3f}"
 
-    logger.info(f"最终投资信号: {final_signal}, 置信度: {confidence}")
+    if special_conditions["policy_sensitive"]:
+        reasoning += " | policy-sensitive"
+    if special_conditions["liquidity_concern"]:
+        reasoning += " | liquidity concern"
+    if special_conditions["high_volatility"]:
+        reasoning += " | high volatility"
 
-    # A股特色辩论结果
+    max_conf = max(bull_confidence, bear_confidence)
+    min_conf = min(bull_confidence, bear_confidence)
+
+    llm_alignment = 1 - abs(llm_score - (adjusted_confidence_diff / 2))
+    llm_alignment = max(0.0, min(1.0, llm_alignment))
+
     message_content = {
+        "agent_type": "llm",
         "signal": final_signal,
         "confidence": confidence,
         "bull_confidence": bull_confidence,
         "bear_confidence": bear_confidence,
         "confidence_diff": confidence_diff,
         "adjusted_confidence_diff": adjusted_confidence_diff,
-        "llm_score": llm_score if llm_analysis else None,
-        "llm_analysis": llm_analysis["analysis"] if llm_analysis and "analysis" in llm_analysis else None,
-        "llm_reasoning": llm_analysis["reasoning"] if llm_analysis and "reasoning" in llm_analysis else None,
+        "llm_score": llm_score,
+        "llm_analysis": llm_analysis.get("analysis"),
+        "llm_reasoning": llm_analysis.get("reasoning"),
         "mixed_confidence_diff": mixed_confidence_diff,
         "debate_summary": debate_summary,
         "reasoning": reasoning,
         "ashare_factors": {
-            "policy_sensitivity": special_conditions['policy_sensitive'],
-            "liquidity_concerns": special_conditions['liquidity_concern'],
+            "policy_sensitivity": special_conditions["policy_sensitive"],
+            "liquidity_concerns": special_conditions["liquidity_concern"],
             "volatility_level": market_volatility,
             "adaptive_threshold": adaptive_threshold,
-            "adjustments_applied": ashare_adjustments
+            "adjustments_applied": ashare_adjustments,
         },
         "decision_quality": {
-            "consensus_strength": 1 - market_volatility,
-            "argument_balance": min(bull_confidence, bear_confidence) / max(bull_confidence, bear_confidence) if max(bull_confidence, bear_confidence) > 0 else 0,
-            "llm_agreement": 1 - abs(llm_score - (adjusted_confidence_diff / 2)) if llm_score is not None else 0
-        }
+            "consensus_strength": max(0.0, min(1.0, 1 - market_volatility)),
+            "argument_balance": (min_conf / max_conf) if max_conf > 0 else 0,
+            "llm_agreement": llm_alignment,
+        },
     }
 
     message = HumanMessage(
@@ -270,28 +303,29 @@ def debate_room_agent(state: AgentState):
 
     if show_reasoning:
         show_agent_reasoning(message_content, "Debate Room")
-    
-    # 始终保存推理信息到metadata供API使用
-    state["metadata"]["agent_reasoning"] = message_content
 
-    show_workflow_status("A股特色辩论室", "completed")
-    logger.info(f"A股辩论室分析完成: {final_signal}, 置信度: {confidence:.3f}")
+    state["metadata"]["agent_reasoning"] = message_content
+    show_workflow_status("Debate Room", "completed")
+    updated_data = dict(state["data"])
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["debate_room"] = message_content
+
     return {
-        "messages": state["messages"] + [message],
+        "messages": [message],
         "data": {
-            **state["data"],
+            **updated_data,
             "debate_analysis": message_content,
             "ashare_debate_metrics": {
                 "volatility_level": market_volatility,
-                "policy_sensitivity": special_conditions['policy_sensitive'],
+                "policy_sensitivity": special_conditions["policy_sensitive"],
                 "decision_confidence": confidence,
-                "consensus_quality": message_content["decision_quality"]["consensus_strength"]
-            }
+                "consensus_quality": message_content["decision_quality"]["consensus_strength"],
+            },
         },
         "metadata": {
             **state["metadata"],
             "debate_enhanced": True,
             "adaptive_threshold": adaptive_threshold,
-            "special_conditions": special_conditions
+            "special_conditions": special_conditions,
         },
     }

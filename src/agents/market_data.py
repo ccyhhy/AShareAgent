@@ -1,108 +1,167 @@
-from langchain_core.messages import HumanMessage
-from src.tools.openrouter_config import get_chat_completion
-from src.agents.state import AgentState, show_agent_reasoning, show_workflow_status
-from src.tools.api import get_financial_metrics, get_financial_statements, get_market_data, get_price_history, calculate_comprehensive_financial_metrics
-from src.utils.logging_config import setup_logger
-from src.utils.api_utils import agent_endpoint, log_llm_interaction
+from __future__ import annotations
 
-from datetime import datetime, timedelta
-import pandas as pd
 import json
+import os
+from datetime import datetime, timedelta
 
-# 设置日志记录
-logger = setup_logger('market_data_agent')
+import pandas as pd
+from langchain_core.messages import HumanMessage
+
+from src.agents.state import (
+    AgentState,
+    maybe_return_ablation_stub,
+    show_agent_reasoning,
+    show_workflow_status,
+)
+from src.tools.api import (
+    calculate_comprehensive_financial_metrics,
+    get_financial_metrics,
+    get_financial_statements,
+    get_market_data,
+    get_price_history,
+)
+from src.utils.api_utils import agent_endpoint
+from src.utils.logging_config import setup_logger
+
+logger = setup_logger("market_data_agent")
 
 
-@agent_endpoint("market_data", "市场数据收集，负责获取股价历史、财务指标和市场信息")
+def _is_truthy_env_var(env_var: str) -> bool:
+    value = os.getenv(env_var)
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _ensure_agent_outputs(data: dict[str, object]) -> dict[str, object]:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
+@agent_endpoint("market_data", "Market data collection and preprocessing")
 def market_data_agent(state: AgentState):
-    """Responsible for gathering and preprocessing market data"""
+    """Gather and normalize market/financial inputs for downstream agents."""
     show_workflow_status("Market Data Agent")
     show_reasoning = state["metadata"]["show_reasoning"]
-
-    messages = state["messages"]
     data = state["data"]
 
-    # Set default dates
+    ablation_result = maybe_return_ablation_stub(
+        state,
+        agent_key="market_data",
+        agent_type="data_layer",
+        message_name="market_data_agent",
+        output_key="market_data",
+        payload_overrides={
+            "ticker": data.get("ticker") or data.get("stock_symbol"),
+            "start_date": data.get("start_date"),
+            "end_date": data.get("end_date"),
+            "data_collected": {
+                "price_history": False,
+                "financial_metrics": False,
+                "financial_statements": False,
+                "market_data": False,
+            },
+            "summary": "Ablation disabled market_data agent. Using empty deterministic payload.",
+        },
+    )
+    if ablation_result is not None:
+        payload = json.loads(ablation_result["messages"][0].content)
+        ablation_result["data"].update(
+            {
+                "prices": [],
+                "financial_metrics": [{}],
+                "financial_line_items": [{}],
+                "market_cap": 0,
+                "market_data": {"market_cap": 0},
+                "start_date": data.get("start_date"),
+                "end_date": data.get("end_date"),
+            }
+        )
+        ablation_result["data"]["agent_outputs"]["market_data"] = payload
+        return ablation_result
+
     current_date = datetime.now()
     yesterday = current_date - timedelta(days=1)
-    end_date = data.get("end_date") or yesterday.strftime('%Y-%m-%d')
+    end_date = data.get("end_date") or yesterday.strftime("%Y-%m-%d")
 
-    # Ensure end_date is not in the future
-    end_date_obj = datetime.strptime(end_date, '%Y-%m-%d')
+    end_date_obj = datetime.strptime(end_date, "%Y-%m-%d")
     if end_date_obj > yesterday:
-        end_date = yesterday.strftime('%Y-%m-%d')
         end_date_obj = yesterday
+        end_date = yesterday.strftime("%Y-%m-%d")
 
     if not data.get("start_date"):
-        # Calculate 1 year before end_date
-        start_date = end_date_obj - timedelta(days=365)  # 默认获取一年的数据
-        start_date = start_date.strftime('%Y-%m-%d')
+        start_date = (end_date_obj - timedelta(days=365)).strftime("%Y-%m-%d")
     else:
         start_date = data["start_date"]
 
-    # Get all required data
     ticker = data.get("ticker") or data.get("stock_symbol")
+    backtest_mode = _is_truthy_env_var("ASHAREAGENT_BACKTEST_MODE")
 
-    # 获取价格数据并验证
-    prices_df = get_price_history(ticker, start_date, end_date)
+    prices_df = get_price_history(
+        ticker,
+        start_date,
+        end_date,
+        provider_preference="local_csv",
+        local_only=backtest_mode,
+    )
     if prices_df is None or prices_df.empty:
-        logger.warning(f"警告：无法获取{ticker}的价格数据，将使用空数据继续")
-        prices_df = pd.DataFrame(
-            columns=['close', 'open', 'high', 'low', 'volume'])
+        logger.warning(
+            f"Warning: no price data for {ticker}, proceeding with empty fallback dataset"
+        )
+        prices_df = pd.DataFrame(columns=["close", "open", "high", "low", "volume"])
 
-    # 获取财务指标
-    try:
-        financial_metrics = get_financial_metrics(ticker)
-    except Exception as e:
-        logger.error(f"获取财务指标失败: {str(e)}")
+    if backtest_mode:
+        logger.info("Backtest mode enabled: skip remote financial metrics fetch")
         financial_metrics = [{}]
-
-    # 获取财务报表
-    try:
-        financial_line_items = get_financial_statements(ticker)
-    except Exception as e:
-        logger.error(f"获取财务报表失败: {str(e)}")
+        logger.info("Backtest mode enabled: skip remote financial statements fetch")
         financial_line_items = [{}]
-
-    # 获取市场数据
-    try:
-        market_data = get_market_data(ticker)
-    except Exception as e:
-        logger.error(f"获取市场数据失败: {str(e)}")
+        logger.info("Backtest mode enabled: skip remote market data fetch")
         market_data = {"market_cap": 0}
+    else:
+        try:
+            financial_metrics = get_financial_metrics(ticker)
+        except Exception as exc:
+            logger.error(f"Failed to fetch financial metrics: {exc}")
+            financial_metrics = [{}]
 
-    # 使用增强的财务指标计算，从多个数据源补充缺失的指标
+        try:
+            financial_line_items = get_financial_statements(ticker)
+        except Exception as exc:
+            logger.error(f"Failed to fetch financial statements: {exc}")
+            financial_line_items = [{}]
+
+        try:
+            market_data = get_market_data(ticker)
+        except Exception as exc:
+            logger.error(f"Failed to fetch market data: {exc}")
+            market_data = {"market_cap": 0}
+
     try:
         logger.info("Computing comprehensive financial metrics from all available data sources...")
         enhanced_metrics = calculate_comprehensive_financial_metrics(
             symbol=ticker,
             financial_statements=financial_line_items,
             financial_indicators=financial_metrics,
-            market_data=market_data
+            market_data=market_data,
         )
-        
-        # 如果增强计算得到了更多指标，则更新financial_metrics
+
         if enhanced_metrics:
-            # 保持原有的格式，但用增强的数据更新
             if financial_metrics and len(financial_metrics) > 0:
                 financial_metrics[0].update(enhanced_metrics)
             else:
                 financial_metrics = [enhanced_metrics]
-            logger.info("✓ Financial metrics enhanced with calculated ratios")
-        
-    except Exception as e:
-        logger.error(f"增强财务指标计算失败: {str(e)}")
-        # 继续使用原有数据，不因增强计算失败而中断整个流程
+            logger.info("Financial metrics enhanced with calculated ratios")
+    except Exception as exc:
+        logger.error(f"Enhanced financial metrics calculation failed: {exc}")
 
-    # 确保数据格式正确
     if not isinstance(prices_df, pd.DataFrame):
-        prices_df = pd.DataFrame(
-            columns=['close', 'open', 'high', 'low', 'volume'])
+        prices_df = pd.DataFrame(columns=["close", "open", "high", "low", "volume"])
 
-    # 转换价格数据为字典格式
-    prices_dict = prices_df.to_dict('records')
+    prices_dict = prices_df.to_dict("records")
 
-    # 保存推理信息到metadata供API使用
     market_data_summary = {
         "ticker": ticker,
         "start_date": start_date,
@@ -111,32 +170,38 @@ def market_data_agent(state: AgentState):
             "price_history": len(prices_dict) > 0,
             "financial_metrics": len(financial_metrics) > 0,
             "financial_statements": len(financial_line_items) > 0,
-            "market_data": len(market_data) > 0
+            "market_data": len(market_data) > 0,
         },
-        "summary": f"为{ticker}收集了从{start_date}到{end_date}的市场数据，包括价格历史、财务指标和市场信息"
+        "summary": (
+            f"Collected market data for {ticker} from {start_date} to {end_date}, "
+            "including price history, financial metrics, and market profile."
+        ),
     }
 
     if show_reasoning:
         show_agent_reasoning(market_data_summary, "Market Data Agent")
         state["metadata"]["agent_reasoning"] = market_data_summary
 
-    # 创建消息
     message = HumanMessage(
         content=json.dumps(market_data_summary, ensure_ascii=False),
         name="market_data_agent",
     )
 
+    updated_data = {
+        **data,
+        "prices": prices_dict,
+        "start_date": start_date,
+        "end_date": end_date,
+        "financial_metrics": financial_metrics,
+        "financial_line_items": financial_line_items,
+        "market_cap": market_data.get("market_cap", 0),
+        "market_data": market_data,
+    }
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["market_data"] = market_data_summary
+
     return {
         "messages": [message],
-        "data": {
-            **data,
-            "prices": prices_dict,
-            "start_date": start_date,
-            "end_date": end_date,
-            "financial_metrics": financial_metrics,
-            "financial_line_items": financial_line_items,
-            "market_cap": market_data.get("market_cap", 0),
-            "market_data": market_data,
-        },
+        "data": updated_data,
         "metadata": state["metadata"],
     }
