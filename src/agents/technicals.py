@@ -14,6 +14,9 @@ from src.utils.logging_config import setup_logger
 
 logger = setup_logger("technical_analyst_agent")
 
+TECHNICALS_ANALYSIS_DOMAIN = "relative_valuation"
+TECHNICALS_ANALYSIS_METRIC = "pb_percentile_5y"
+
 
 def _score_pb_percentile(percentile: float) -> int:
     if percentile < 20:
@@ -46,6 +49,13 @@ def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
         agent_outputs = {}
     data["agent_outputs"] = agent_outputs
     return agent_outputs
+
+
+def _with_relative_valuation_semantics(payload: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(payload)
+    enriched.setdefault("analysis_domain", TECHNICALS_ANALYSIS_DOMAIN)
+    enriched.setdefault("analysis_metric", TECHNICALS_ANALYSIS_METRIC)
+    return enriched
 
 
 @agent_endpoint("technical_analyst", "估值分析师（规则引擎），基于PB历史百分位输出估值信号")
@@ -117,6 +127,8 @@ def technical_analyst_agent(state: AgentState):
                 "sample_size": int(len(lookback)),
             }
 
+    message_content = _with_relative_valuation_semantics(message_content)
+
     message = HumanMessage(
         content=json.dumps(message_content, ensure_ascii=False),
         name="technical_analyst_agent",
@@ -126,9 +138,10 @@ def technical_analyst_agent(state: AgentState):
     agent_outputs = _ensure_agent_outputs(updated_data)
     agent_outputs["technicals"] = message_content
     updated_data["technical_analysis"] = message_content
+    updated_data["relative_valuation_analysis"] = message_content
 
     if show_reasoning:
-        show_agent_reasoning(message_content, "Technical Analysis")
+        show_agent_reasoning(message_content, "Relative Valuation (PB Percentile)")
     state["metadata"]["agent_reasoning"] = message_content
 
     show_workflow_status("Technical Analyst", "completed")

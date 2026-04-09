@@ -35,6 +35,7 @@ except ImportError:
     from src.backtesting.visualizer import PerformanceVisualizer
     from src.backtesting.benchmarks import BenchmarkCalculator
 from src.tools.api import get_price_data
+from src.tools.local_csv_provider import LocalCSVProvider
 
 # 抑制警告
 warnings.filterwarnings('ignore')
@@ -93,18 +94,25 @@ class IntelligentBacktester:
         # 默认agent频率配置
         default_frequencies = {
             'market_data': 'daily',       # 市场数据每日更新
-            'technical': 'daily',         # 技术分析每日更新  
+            'technical': 'daily',         # 相对估值(PB百分位)更新（兼容 technical 键）
             'fundamentals': 'weekly',     # 基本面分析每周更新
             'sentiment': 'daily',         # 情绪分析每日更新
             'valuation': 'monthly',       # 估值分析每月更新
             'macro': 'weekly',            # 宏观分析每周更新
             'portfolio': 'daily'          # 投资组合管理每日更新
         }
-        
-        self.agent_frequencies = agent_frequencies or default_frequencies
+
+        normalized_frequencies = dict(agent_frequencies) if agent_frequencies else None
+        # Day5 naming convergence: allow `relative_valuation` as an input alias.
+        if normalized_frequencies and 'relative_valuation' in normalized_frequencies and 'technical' not in normalized_frequencies:
+            normalized_frequencies['technical'] = normalized_frequencies.pop('relative_valuation')
+
+        self.agent_frequencies = normalized_frequencies or default_frequencies
         
         # 初始化组件
         self.cache_manager = CacheManager()
+        self.local_csv_provider = LocalCSVProvider()
+        self._pb_history_cache: Optional[pd.DataFrame] = None
         self.trade_executor = TradeExecutor(self.transaction_cost, self.slippage)
         self.visualizer = PerformanceVisualizer(ticker, initial_capital)
         self.benchmark_calculator = BenchmarkCalculator(benchmark_type, initial_capital)
@@ -238,6 +246,103 @@ class IntelligentBacktester:
             if len(self._price_changes) >= 5:
                 volatility = np.std(list(self._price_changes))
                 self._market_volatility.append(volatility)
+
+    @staticmethod
+    def _score_pb_percentile(percentile: float) -> int:
+        """Map PB percentile to valuation score (aligned with technicals agent semantics)."""
+        if percentile < 20:
+            return 90
+        if percentile < 40:
+            return 70
+        if percentile < 60:
+            return 50
+        if percentile > 80:
+            return 10
+        return 30
+
+    @staticmethod
+    def _signal_from_valuation_score(score: int) -> str:
+        if score >= 70:
+            return "bullish"
+        if score <= 30:
+            return "bearish"
+        return "neutral"
+
+    def _resolve_relative_valuation_signal(
+        self,
+        df: pd.DataFrame,
+        current_price: float,
+        current_date: str,
+    ) -> Dict[str, Any]:
+        """
+        Resolve first-layer valuation position signal:
+        1) PB percentile from price data if available.
+        2) PB percentile from local CSV history.
+        3) Explicit missing-PB fallback (do not mix trend semantics into valuation signal).
+        """
+        if "pb" in df.columns:
+            pb_series = pd.to_numeric(df["pb"], errors="coerce")
+            pb_series = pb_series.loc[pb_series > 0].dropna()
+            if not pb_series.empty:
+                current_pb = float(pb_series.iloc[-1])
+                percentile = float((pb_series <= current_pb).mean() * 100)
+                score = self._score_pb_percentile(percentile)
+                return {
+                    "signal": self._signal_from_valuation_score(score),
+                    "source": "price_data_pb",
+                    "pb_current": round(current_pb, 4),
+                    "pb_percentile_5y": round(percentile, 2),
+                    "valuation_score": score,
+                    "sample_size": int(len(pb_series)),
+                }
+
+        try:
+            if self._pb_history_cache is None:
+                self._pb_history_cache = self.local_csv_provider.get_pb_history(str(self.ticker))
+
+            pb_history = self._pb_history_cache
+            if isinstance(pb_history, pd.DataFrame) and not pb_history.empty and {"date", "pb"}.issubset(pb_history.columns):
+                pb_df = pb_history.copy()
+                pb_df["date"] = pd.to_datetime(pb_df["date"], errors="coerce")
+                pb_df["pb"] = pd.to_numeric(pb_df["pb"], errors="coerce")
+                pb_df = pb_df.dropna(subset=["date", "pb"]).sort_values("date")
+                pb_df = pb_df.loc[pb_df["pb"] > 0]
+
+                if not pb_df.empty:
+                    end_date = pd.to_datetime(current_date, errors="coerce")
+                    if pd.isna(end_date):
+                        end_date = pb_df["date"].max()
+                    start_date = end_date - pd.DateOffset(years=5)
+
+                    lookback = pb_df.loc[(pb_df["date"] >= start_date) & (pb_df["date"] <= end_date)]
+                    if lookback.empty:
+                        lookback = pb_df.loc[pb_df["date"] <= end_date]
+                    if lookback.empty:
+                        lookback = pb_df
+
+                    current_pb = float(lookback["pb"].iloc[-1])
+                    percentile = float((lookback["pb"] <= current_pb).mean() * 100)
+                    score = self._score_pb_percentile(percentile)
+                    return {
+                        "signal": self._signal_from_valuation_score(score),
+                        "source": "local_csv_pb",
+                        "pb_current": round(current_pb, 4),
+                        "pb_percentile_5y": round(percentile, 2),
+                        "valuation_score": score,
+                        "sample_size": int(len(lookback)),
+                    }
+        except Exception as exc:
+            self.logger.warning(f"PB percentile fallback failed: {exc}")
+
+        return {
+            "signal": "neutral",
+            "source": "missing_pb",
+            "pb_current": None,
+            "pb_percentile_5y": None,
+            "valuation_score": 50,
+            "sample_size": 0,
+            "reasoning": "PB history unavailable; valuation signal stays neutral for semantic safety.",
+        }
 
     def get_agent_decision(self, current_date: str, lookback_start: str, portfolio: Dict[str, float]) -> Dict[str, Any]:
         """获取智能体决策，支持细粒度频率控制和错误恢复"""
@@ -407,38 +512,13 @@ class IntelligentBacktester:
             current_price = df.iloc[-1]['open']
             
             # 简化的决策逻辑 - 确保总是有信号生成
-            signals = {}
-            
-            # 总是执行基本的技术分析（即使不在agents_to_execute中）
-            if len(df) >= 20:
-                ma20 = df['close'].rolling(20).mean().iloc[-1]
-                if current_price > ma20:  # 价格只要超过20日均线就是多头
-                    signals['technical'] = 'bullish'
-                elif current_price < ma20 * 0.99:  # 价格低于20日均线1%
-                    signals['technical'] = 'bearish'
-                else:
-                    signals['technical'] = 'neutral'
-            elif len(df) >= 5:
-                # 如果数据不足20天，使用5日均线
-                ma5 = df['close'].rolling(5).mean().iloc[-1]
-                if current_price > ma5:  # 价格只要超过5日均线就是多头
-                    signals['technical'] = 'bullish'
-                elif current_price < ma5 * 0.995:
-                    signals['technical'] = 'bearish'
-                else:
-                    signals['technical'] = 'neutral'
-            else:
-                # 数据不足时，基于短期价格变化
-                if len(df) >= 2:
-                    price_change = (current_price / df['close'].iloc[-2] - 1)
-                    if price_change > 0.005:  # 0.5%上涨
-                        signals['technical'] = 'bullish'
-                    elif price_change < -0.005:  # 0.5%下跌
-                        signals['technical'] = 'bearish'
-                    else:
-                        signals['technical'] = 'neutral'
-                else:
-                    signals['technical'] = 'neutral'
+            signals: Dict[str, str] = {}
+
+            # Day5 convergence: first-layer "technical" semantics now follow relative valuation (PB percentile).
+            valuation_signal = self._resolve_relative_valuation_signal(df, current_price, current_date)
+            signals['relative_valuation'] = valuation_signal['signal']
+            signals['relative_valuation_analysis'] = valuation_signal['signal']
+            signals['technical'] = valuation_signal['signal']  # compatibility alias
             
             # 总是执行情绪分析（基于价格动量）
             if len(df) >= 5:
@@ -473,12 +553,25 @@ class IntelligentBacktester:
             else:
                 signals['volume'] = 'normal'
             
+            # Avoid counting compatibility aliases twice in decision scoring.
+            decision_signals = {
+                'relative_valuation': signals['relative_valuation'],
+                'sentiment': signals['sentiment'],
+                'volume': signals['volume'],
+            }
+
             # 基于信号组合做出决策 - 更灵活的决策逻辑
-            bullish_signals = sum(1 for s in signals.values() if s in ['bullish', 'positive', 'active'])
-            bearish_signals = sum(1 for s in signals.values() if s in ['bearish', 'negative'])
-            neutral_signals = sum(1 for s in signals.values() if s in ['neutral', 'normal', 'quiet'])
+            bullish_signals = sum(1 for s in decision_signals.values() if s in ['bullish', 'positive', 'active'])
+            bearish_signals = sum(1 for s in decision_signals.values() if s in ['bearish', 'negative'])
+            neutral_signals = sum(1 for s in decision_signals.values() if s in ['neutral', 'normal', 'quiet'])
             
             self.logger.info(f"信号分析: {signals}")
+            self.logger.info(
+                "Relative valuation source=%s, pb_percentile_5y=%s, valuation_score=%s",
+                valuation_signal.get('source'),
+                valuation_signal.get('pb_percentile_5y'),
+                valuation_signal.get('valuation_score'),
+            )
             self.logger.info(f"多头信号: {bullish_signals}, 空头信号: {bearish_signals}, 中性信号: {neutral_signals}")
             
             # 如果当前没有持仓，更容易买入
@@ -506,6 +599,7 @@ class IntelligentBacktester:
             return {
                 "decision": decision,
                 "analyst_signals": signals,
+                "analysis_metadata": {"relative_valuation": valuation_signal},
                 "execution_type": "partial_workflow",
                 "agents_executed": agents_to_execute
             }
@@ -842,7 +936,7 @@ if __name__ == "__main__":
                         help='市场数据更新频率 (默认: daily)')
     parser.add_argument('--technical-freq', type=str, default='daily',
                         choices=['daily', 'weekly', 'monthly', 'conditional'],
-                        help='技术分析频率 (默认: daily)')
+                        help='相对估值(PB百分位)频率（兼容 technical 键，默认: daily）')
     parser.add_argument('--fundamentals-freq', type=str, default='weekly',
                         choices=['daily', 'weekly', 'monthly', 'conditional'],
                         help='基本面分析频率 (默认: weekly)')

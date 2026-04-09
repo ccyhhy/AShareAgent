@@ -19,6 +19,12 @@ from backend.services.auth_service import get_current_active_user, require_permi
 from backend.dependencies import get_database_manager
 from backend.state import api_state
 from backend.services import execute_stock_analysis
+from backend.services.analysis import (
+    _build_analysis_payload,
+    _collect_agent_results,
+    _ensure_primary_contract,
+    _extract_portfolio_decision,
+)
 from backend.utils.api_utils import serialize_for_api, safe_parse_json
 from src.database.models import DatabaseManager
 
@@ -385,7 +391,7 @@ async def get_analysis_result(
                         "task_id": task_data["task_id"],
                         "ticker": task_data["ticker"],
                         "completion_time": task_data["completed_at"],
-                        "result": stored_result
+                        "result": _ensure_primary_contract(stored_result),
                     }
                 )
             except json.JSONDecodeError as e:
@@ -413,60 +419,23 @@ async def get_analysis_result(
             )
         
         # 收集所有参与此运行的Agent数据
-        agent_results = {}
+        agent_outputs = {}
         ticker = task_data["ticker"]
-        
-        for agent_name in run_info.agents:
-            agent_data = api_state.get_agent_data(agent_name)
-            if agent_data:
-                reasoning_data = None
-                
-                # 特殊处理bull/bear agents，使用agent特定键
-                if agent_name in ['researcher_bull_agent', 'researcher_bear_agent']:
-                    agent_specific_key = f"{agent_name}_reasoning"
-                    if agent_specific_key in agent_data:
-                        reasoning_data = agent_data[agent_specific_key]
-                        logger.info(f"从内存获取{agent_name}特定数据: {agent_specific_key}")
-                    elif "reasoning" in agent_data:
-                        reasoning_data = agent_data["reasoning"]
-                        logger.warning(f"从内存获取{agent_name}fallback数据")
-                        # 验证这不是sentiment数据
-                        if isinstance(reasoning_data, str) and 'sentiment score' in reasoning_data.lower():
-                            logger.error(f"跳过{agent_name}的sentiment数据")
-                            continue
-                else:
-                    # 其他agents使用标准reasoning键
-                    if "reasoning" in agent_data:
-                        reasoning_data = agent_data["reasoning"]
-                
-                if reasoning_data:
-                    reasoning_data = safe_parse_json(reasoning_data)
-                    # 映射agent名称到前端期望的名称
-                    from backend.services.analysis import _map_agent_name
-                    frontend_name = _map_agent_name(agent_name)
-                    agent_results[frontend_name] = serialize_for_api(reasoning_data)
+        all_agents = api_state.get_all_agent_data()
+        if run_info.agents:
+            agent_outputs = _collect_agent_results(
+                all_agents=all_agents,
+                participating_agents=run_info.agents,
+            )
 
-        # 尝试获取portfolio_management的最终决策
-        final_decision = None
-        portfolio_data = api_state.get_agent_data("portfolio_management")
-        if portfolio_data and "output_state" in portfolio_data:
-            try:
-                output = portfolio_data["output_state"]
-                messages = output.get("messages", [])
-                if messages:
-                    last_message = messages[-1]
-                    if hasattr(last_message, "content"):
-                        final_decision = safe_parse_json(last_message.content)
-            except Exception as e:
-                logger.error(f"解析最终决策时出错: {str(e)}")
-
-        result_data = {
-            "task_id": run_id,
-            "ticker": ticker,
-            "completion_time": task_data["completed_at"],
-            "final_decision": serialize_for_api(final_decision),
-            "agent_results": agent_results
-        }
+        final_decision = _extract_portfolio_decision(all_agents.get("portfolio_management_agent"))
+        result_data = _build_analysis_payload(
+            ticker=ticker,
+            run_id=run_id,
+            final_decision=final_decision,
+            agent_outputs=agent_outputs,
+            completion_time=str(task_data["completed_at"]),
+        )
 
         return ApiResponse(
             success=True,

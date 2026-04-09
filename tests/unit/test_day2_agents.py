@@ -64,9 +64,12 @@ def test_technical_agent_uses_pb_percentile_and_standardized_output():
     assert "agent_outputs" in result["data"]
     agent_output = result["data"]["agent_outputs"]["technicals"]
     assert agent_output["agent_type"] == "rule_engine"
+    assert agent_output["analysis_domain"] == "relative_valuation"
+    assert agent_output["analysis_metric"] == "pb_percentile_5y"
     assert "pb_percentile_5y" in agent_output
     assert "valuation_score" in agent_output
     assert result["data"]["technical_analysis"] == agent_output
+    assert result["data"]["relative_valuation_analysis"] == agent_output
 
 
 @pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")

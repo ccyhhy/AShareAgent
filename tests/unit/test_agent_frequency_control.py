@@ -79,6 +79,27 @@ class TestAgentFrequencyControl:
         
         assert backtester.agent_frequencies == self.custom_frequencies
         assert all(agent in backtester._agent_execution_stats for agent in self.custom_frequencies.keys())
+
+    def test_relative_valuation_frequency_alias_maps_to_technical(self):
+        """测试 relative_valuation 频率别名会映射到 technical（兼容键）"""
+        alias_frequencies = {
+            'market_data': 'daily',
+            'relative_valuation': 'weekly',
+            'fundamentals': 'monthly',
+            'sentiment': 'daily',
+            'valuation': 'monthly',
+            'macro': 'weekly',
+            'portfolio': 'daily'
+        }
+
+        backtester = IntelligentBacktester(
+            agent=self.mock_agent,
+            agent_frequencies=alias_frequencies,
+            **self.default_config
+        )
+
+        assert 'relative_valuation' not in backtester.agent_frequencies
+        assert backtester.agent_frequencies['technical'] == 'weekly'
     
     @pytest.mark.parametrize("frequency,date,expected", [
         ('daily', datetime(2024, 1, 15), True),  # 任意日期
@@ -232,6 +253,36 @@ class TestAgentFrequencyControl:
             assert 'execution_type' in result
             assert result['execution_type'] == 'partial_workflow'
             assert result['agents_executed'] == agents_to_execute
+
+    def test_partial_workflow_uses_pb_percentile_semantics(self):
+        """测试 partial workflow 的 technical 信号语义已收敛到 PB 百分位"""
+        backtester = IntelligentBacktester(
+            agent=self.mock_agent,
+            **self.default_config
+        )
+
+        agents_to_execute = ['technical', 'sentiment']
+
+        with patch.object(backtester.cache_manager, 'get_cached_price_data') as mock_price_data:
+            import pandas as pd
+
+            test_data = pd.DataFrame({
+                'open': [10.0] * 30,
+                'close': [10.0] * 30,
+                'pb': list(range(1, 31)),  # 当前PB最高 -> 百分位高 -> bearish
+                'volume': [1_000_000] * 30,
+            })
+            mock_price_data.return_value = test_data
+
+            result = backtester._execute_partial_workflow(
+                agents_to_execute, '2024-01-15', '2023-12-15', {'cash': 100000, 'stock': 0}
+            )
+
+        signals = result['analyst_signals']
+        assert signals['relative_valuation'] == 'bearish'
+        assert signals['technical'] == signals['relative_valuation']
+        assert signals['relative_valuation_analysis'] == signals['relative_valuation']
+        assert result['analysis_metadata']['relative_valuation']['source'] == 'price_data_pb'
     
     def test_frequency_validation(self):
         """测试频率配置验证"""

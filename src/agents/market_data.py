@@ -28,6 +28,14 @@ def _is_truthy_env_var(env_var: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _ensure_agent_outputs(data: dict[str, object]) -> dict[str, object]:
+    agent_outputs = data.get("agent_outputs")
+    if not isinstance(agent_outputs, dict):
+        agent_outputs = {}
+    data["agent_outputs"] = agent_outputs
+    return agent_outputs
+
+
 @agent_endpoint("market_data", "Market data collection and preprocessing")
 def market_data_agent(state: AgentState):
     """Gather and normalize market/financial inputs for downstream agents."""
@@ -139,17 +147,21 @@ def market_data_agent(state: AgentState):
         name="market_data_agent",
     )
 
+    updated_data = {
+        **data,
+        "prices": prices_dict,
+        "start_date": start_date,
+        "end_date": end_date,
+        "financial_metrics": financial_metrics,
+        "financial_line_items": financial_line_items,
+        "market_cap": market_data.get("market_cap", 0),
+        "market_data": market_data,
+    }
+    agent_outputs = _ensure_agent_outputs(updated_data)
+    agent_outputs["market_data"] = market_data_summary
+
     return {
         "messages": [message],
-        "data": {
-            **data,
-            "prices": prices_dict,
-            "start_date": start_date,
-            "end_date": end_date,
-            "financial_metrics": financial_metrics,
-            "financial_line_items": financial_line_items,
-            "market_cap": market_data.get("market_cap", 0),
-            "market_data": market_data,
-        },
+        "data": updated_data,
         "metadata": state["metadata"],
     }

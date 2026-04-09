@@ -215,13 +215,13 @@ def init_agents():
     default_agents = [
         {
             "name": "technical_analyst",
-            "display_name": "技术分析师",
-            "description": "负责股票技术指标分析，包括趋势、均线、成交量等技术面分析",
+            "display_name": "相对估值分析师（PB百分位）",
+            "description": "负责基于PB历史分位的相对估值位置判断，输出估值位置与置信度信号",
             "agent_type": "analysis",
             "status": "active",
             "config": {
-                "indicators": ["MA", "MACD", "RSI", "BB", "ADX"],
-                "timeframes": ["daily", "weekly"],
+                "metric": "pb_percentile_5y",
+                "lookback_window": "5y",
                 "signal_threshold": 0.6
             }
         },
@@ -239,8 +239,8 @@ def init_agents():
         },
         {
             "name": "sentiment",
-            "display_name": "情感分析师",
-            "description": "负责市场情绪和新闻舆情分析，提供投资者情绪指标",
+            "display_name": "市场情绪分析师（新闻）",
+            "description": "负责新闻舆情驱动的市场情绪分析，输出市场情绪信号与置信度",
             "agent_type": "sentiment",
             "status": "active",
             "config": {

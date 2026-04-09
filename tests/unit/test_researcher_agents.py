@@ -62,6 +62,8 @@ class TestResearcherBullAgent:
         # 解析消息内容
         content = json.loads(new_message.content)
         assert content["perspective"] == "bullish"
+        assert content["technical_signal_semantics"] == "relative_valuation_pb_percentile"
+        assert content["sentiment_signal_semantics"] == "market_news_sentiment"
         assert isinstance(content["confidence"], float)
         assert 0 <= content["confidence"] <= 1
         assert "thesis_points" in content
@@ -180,6 +182,8 @@ class TestResearcherBearAgent:
         content = json.loads(new_message.content)
         
         assert content["perspective"] == "bearish"
+        assert content["technical_signal_semantics"] == "relative_valuation_pb_percentile"
+        assert content["sentiment_signal_semantics"] == "market_news_sentiment"
         assert isinstance(content["confidence"], float)
         assert "thesis_points" in content
         assert "risk_factors" in content
