@@ -7,6 +7,22 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_KB_PATH = Path(__file__).resolve().parents[2] / "data" / "knowledge_base.db"
+MAX_FUNDAMENTALS_PAYLOAD_CHARS = 16000
+MAX_JSON_STRING_CHARS = 2000
+MAX_JSON_LIST_ITEMS = 8
+MAX_JSON_DICT_ITEMS = 16
+_ALLOWED_FUNDAMENTALS_KEYS = {
+    "signal",
+    "confidence",
+    "summary",
+    "reasoning",
+    "memory_delta",
+    "retrieved_refs",
+    "analysis_mode",
+    "analysis_domain",
+    "analysis_metric",
+    "agent_type",
+}
 
 
 def _normalize_stock_code(stock_code: str | None) -> str:
@@ -14,6 +30,66 @@ def _normalize_stock_code(stock_code: str | None) -> str:
     if not raw:
         return ""
     return raw.split(".")[0]
+
+
+def _compact_json_value(value: Any, *, depth: int = 0) -> Any:
+    if value is None or isinstance(value, (int, float, bool)):
+        return value
+    if isinstance(value, str):
+        return value[:MAX_JSON_STRING_CHARS]
+    if depth >= 4:
+        return str(value)[:MAX_JSON_STRING_CHARS]
+    if isinstance(value, list):
+        return [
+            _compact_json_value(item, depth=depth + 1)
+            for item in value[:MAX_JSON_LIST_ITEMS]
+        ]
+    if isinstance(value, dict):
+        compacted: dict[str, Any] = {}
+        for idx, (key, item) in enumerate(value.items()):
+            if idx >= MAX_JSON_DICT_ITEMS:
+                break
+            compacted[str(key)] = _compact_json_value(item, depth=depth + 1)
+        return compacted
+    return str(value)[:MAX_JSON_STRING_CHARS]
+
+
+def _extract_summary_text(analysis_payload: dict[str, Any]) -> str:
+    summary = analysis_payload.get("summary")
+    if isinstance(summary, str) and summary.strip():
+        return summary[:240]
+    reasoning = analysis_payload.get("reasoning")
+    if isinstance(reasoning, str) and reasoning.strip():
+        return reasoning[:240]
+    if isinstance(reasoning, dict):
+        reasoning_text = reasoning.get("summary") or reasoning.get("memory_comparison")
+        if isinstance(reasoning_text, str) and reasoning_text.strip():
+            return reasoning_text[:240]
+        return json.dumps(_compact_json_value(reasoning), ensure_ascii=False)[:240]
+    return ""
+
+
+def _compact_fundamentals_payload(analysis_payload: dict[str, Any]) -> dict[str, Any]:
+    compact_payload: dict[str, Any] = {}
+    for key in _ALLOWED_FUNDAMENTALS_KEYS:
+        if key in analysis_payload:
+            compact_payload[key] = _compact_json_value(analysis_payload[key])
+
+    compact_payload.setdefault("summary", _extract_summary_text(analysis_payload))
+    payload_json = json.dumps(compact_payload, ensure_ascii=False)
+    if len(payload_json) <= MAX_FUNDAMENTALS_PAYLOAD_CHARS:
+        return compact_payload
+
+    fallback_payload = {
+        "signal": analysis_payload.get("signal"),
+        "confidence": analysis_payload.get("confidence"),
+        "summary": _extract_summary_text(analysis_payload),
+        "reasoning": _compact_json_value(analysis_payload.get("reasoning")),
+        "memory_delta": _compact_json_value(analysis_payload.get("memory_delta")),
+        "retrieved_refs": _compact_json_value(analysis_payload.get("retrieved_refs")),
+        "payload_truncated": True,
+    }
+    return fallback_payload
 
 
 class KnowledgeBase:
@@ -66,12 +142,13 @@ class KnowledgeBase:
         if not normalized_code or not isinstance(analysis_payload, dict):
             return False
 
-        payload_json = json.dumps(analysis_payload, ensure_ascii=False)
+        compact_payload = _compact_fundamentals_payload(analysis_payload)
+        payload_json = json.dumps(compact_payload, ensure_ascii=False)
         date_value = analysis_date or datetime.now().strftime("%Y-%m-%d")
         created_at = datetime.now().isoformat()
-        signal = str(analysis_payload.get("signal", ""))
-        confidence = str(analysis_payload.get("confidence", ""))
-        summary_text = summary or str(analysis_payload.get("reasoning", ""))[:240]
+        signal = str(compact_payload.get("signal", ""))
+        confidence = str(compact_payload.get("confidence", ""))
+        summary_text = summary or str(compact_payload.get("summary", ""))[:240]
 
         with self._connect() as conn:
             conn.execute(

@@ -5,6 +5,7 @@
 import os
 import sys
 import json
+import builtins
 from pathlib import Path
 from datetime import datetime
 
@@ -15,6 +16,17 @@ sys.path.insert(0, str(project_root))
 from src.database.models import DatabaseManager, AgentModel
 from backend.models.auth_models import UserAuthService
 from src.utils.dual_logger import init_dual_logging_system, get_dual_logger
+
+
+def _safe_console_text(value) -> str:
+    text = str(value)
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+    return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+
+
+def print(*args, **kwargs):
+    safe_args = tuple(_safe_console_text(arg) for arg in args)
+    return builtins.print(*safe_args, **kwargs)
 
 
 def init_database():

@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -24,12 +25,6 @@ SENTIMENT_ANALYSIS_METRIC = "news_sentiment_score_7d"
 NEWS_LOOKBACK_DAYS = 7
 
 
-def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 def _with_sentiment_semantics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -37,6 +32,21 @@ def _with_sentiment_semantics(payload: dict[str, Any]) -> dict[str, Any]:
     enriched.setdefault("analysis_domain", SENTIMENT_ANALYSIS_DOMAIN)
     enriched.setdefault("analysis_metric", SENTIMENT_ANALYSIS_METRIC)
     return enriched
+
+
+def _resolve_reference_datetime(end_date: Any) -> datetime:
+    text = str(end_date or "").strip()
+    if text:
+        candidate = text[:19]
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(candidate, fmt)
+                if fmt == "%Y-%m-%d":
+                    return parsed.replace(hour=23, minute=59, second=59)
+                return parsed
+            except ValueError:
+                continue
+    return datetime.now()
 
 
 def _is_backtest_mode() -> bool:
@@ -85,7 +95,7 @@ def sentiment_agent(state: AgentState):
                 "signal": "neutral",
                 "confidence": "50%",
                 "reasoning": (
-                    "Backtest mode active. Remote news crawling and sentiment model calls skipped."
+                    "当前为回测模式，已跳过远程新闻抓取与情绪模型调用。"
                 ),
                 "sentiment_score": 0.0,
                 "news_count": 0,
@@ -119,7 +129,8 @@ def sentiment_agent(state: AgentState):
     end_date = data.get("end_date")
     news_list = get_stock_news(symbol, max_news=num_of_news, date=end_date) or []
 
-    cutoff_date = datetime.now() - timedelta(days=NEWS_LOOKBACK_DAYS)
+    reference_datetime = _resolve_reference_datetime(end_date)
+    cutoff_date = reference_datetime - timedelta(days=NEWS_LOOKBACK_DAYS)
     recent_news: list[dict[str, Any]] = []
     for news in news_list:
         if "publish_time" not in news:
@@ -149,8 +160,8 @@ def sentiment_agent(state: AgentState):
         "signal": signal,
         "confidence": confidence,
         "reasoning": (
-            f"Market sentiment from {len(recent_news)} recent news articles; "
-            f"sentiment_score={sentiment_score:.2f}."
+            f"基于近 {len(recent_news)} 条新闻计算市场情绪，"
+            f"情绪得分={sentiment_score:.2f}。"
         ),
         "sentiment_score": round(sentiment_score, 4),
         "news_count": len(recent_news),
@@ -180,3 +191,4 @@ def sentiment_agent(state: AgentState):
         },
         "metadata": state["metadata"],
     }
+

@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -88,12 +89,12 @@ def _two_stage_dcf(
 
 def _margin_assessment(margin_of_safety: float) -> str:
     if margin_of_safety >= 0.35:
-        return "high"
+        return "高"
     if margin_of_safety >= 0.15:
-        return "moderate"
+        return "中"
     if margin_of_safety >= 0.0:
-        return "low"
-    return "negative"
+        return "低"
+    return "负"
 
 
 def _signal_from_margin(margin_of_safety: float) -> str:
@@ -109,12 +110,6 @@ def _confidence_from_margin(margin_of_safety: float) -> str:
     return f"{round(confidence * 100)}%"
 
 
-def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 @agent_endpoint("valuation", "DCF估值分析师（定量模型）")
@@ -169,14 +164,27 @@ def valuation_agent(state: AgentState):
         years=5,
     )
 
-    if market_cap > 0:
+    has_core_inputs = latest_fcf > 0 and market_cap > 0 and intrinsic_value > 0
+    if has_core_inputs:
         margin_of_safety = (intrinsic_value - market_cap) / market_cap
+        margin_assessment = _margin_assessment(margin_of_safety)
+        signal = _signal_from_margin(margin_of_safety)
+        confidence = _confidence_from_margin(margin_of_safety)
+        reasoning = (
+            f"两阶段DCF测算内在价值={intrinsic_value:,.2f}，当前市值={market_cap:,.2f}，"
+            f"安全边际={margin_of_safety:.2%}（{margin_assessment}）。"
+        )
+        data_quality = "正常"
     else:
-        margin_of_safety = 0.0
-
-    margin_assessment = _margin_assessment(margin_of_safety)
-    signal = _signal_from_margin(margin_of_safety)
-    confidence = _confidence_from_margin(margin_of_safety)
+        margin_of_safety = None
+        margin_assessment = "数据不足"
+        signal = "neutral"
+        confidence = "30%"
+        reasoning = (
+            "估值所需关键数据不足（自由现金流或市值缺失/无效），"
+            "因此DCF结论降级为中性。"
+        )
+        data_quality = "数据不足"
 
     message_content = {
         "agent_type": "quantitative_model",
@@ -184,8 +192,9 @@ def valuation_agent(state: AgentState):
         "confidence": confidence,
         "intrinsic_value": round(intrinsic_value, 2),
         "market_cap": round(market_cap, 2),
-        "margin_of_safety": round(margin_of_safety, 4),
+        "margin_of_safety": round(margin_of_safety, 4) if margin_of_safety is not None else None,
         "margin_of_safety_assessment": margin_assessment,
+        "data_quality": data_quality,
         "assumptions": {
             "stage1_years": 5,
             "stage1_growth_rate": round(stage1_growth_rate, 4),
@@ -195,10 +204,7 @@ def valuation_agent(state: AgentState):
         },
         "discounted_cashflows": discounted_cashflows,
         "discounted_terminal_value": round(discounted_terminal_value, 2),
-        "reasoning": (
-            f"Two-stage DCF intrinsic value={intrinsic_value:,.2f}, market cap={market_cap:,.2f}, "
-            f"margin_of_safety={margin_of_safety:.2%} ({margin_assessment})."
-        ),
+        "reasoning": reasoning,
     }
 
     message = HumanMessage(
@@ -221,3 +227,4 @@ def valuation_agent(state: AgentState):
         "data": updated_data,
         "metadata": state["metadata"],
     }
+

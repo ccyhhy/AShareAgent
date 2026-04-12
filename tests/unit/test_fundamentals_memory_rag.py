@@ -144,3 +144,71 @@ def test_fundamentals_agent_reports_longitudinal_memory_delta(monkeypatch):
     assert output["memory_delta"]["change_type"] in {"signal_reversal", "confidence_shift", "stable"}
     assert output["memory_delta"]["summary"]
     assert output["reasoning"]["memory_comparison"] == output["memory_delta"]["summary"]
+
+
+def test_fundamentals_agent_saves_memory_with_metadata_run_id(monkeypatch):
+    monkeypatch.setattr(fundamentals_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(fundamentals_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+
+    captured: dict[str, object] = {}
+
+    class FakeKnowledgeBase:
+        def retrieve_fundamentals_refs(
+            self,
+            stock_code: str,
+            limit: int,
+            as_of_date: str | None = None,
+            include_payload: bool = True,
+        ):
+            return []
+
+        def save_fundamentals_memory(self, **kwargs):
+            captured.update(kwargs)
+            return True
+
+    monkeypatch.setattr(fundamentals_module, "_get_knowledge_base", lambda: FakeKnowledgeBase())
+
+    state = _make_state()
+    state["metadata"]["run_id"] = "run-from-metadata"
+
+    fundamentals_module.fundamentals_agent(state)
+
+    assert captured["run_id"] == "run-from-metadata"
+    assert captured["stock_code"] == "000001.SZ"
+    assert captured["analysis_date"] == "2026-04-08"
+
+
+def test_knowledge_base_save_compacts_large_payload(tmp_path: Path):
+    kb = KnowledgeBase(db_path=tmp_path / "knowledge_base.sqlite")
+    huge_text = "x" * 50000
+
+    assert kb.save_fundamentals_memory(
+        stock_code="000001.SZ",
+        analysis_payload={
+            "signal": "bullish",
+            "confidence": "88%",
+            "reasoning": {"summary": huge_text, "raw": huge_text},
+            "memory_delta": {"summary": huge_text, "raw": huge_text},
+            "retrieved_refs": [
+                {
+                    "analysis_date": "2026-04-01",
+                    "payload": {"nested": huge_text},
+                    "summary": huge_text,
+                }
+            ],
+            "input_state": {"should": "not_be_stored", "raw": huge_text},
+            "output_state": {"should": "not_be_stored", "raw": huge_text},
+        },
+        analysis_date="2026-04-08",
+    )
+
+    refs = kb.retrieve_fundamentals_refs(stock_code="000001.SZ", limit=1)
+
+    assert len(refs) == 1
+    payload = refs[0]["payload"]
+    assert payload["signal"] == "bullish"
+    assert payload["confidence"] == "88%"
+    assert "input_state" not in payload
+    assert "output_state" not in payload
+    assert len(payload["reasoning"]["summary"]) <= 2000
+    assert len(json.dumps(payload, ensure_ascii=False)) < 16000

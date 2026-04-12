@@ -58,7 +58,7 @@ class TestResearcherBullAgent:
         
         # 检查新消息
         new_message = result["messages"][0]
-        assert new_message.name == "researcher_bull_agent"
+        assert new_message.name == "researcher_bull"
         
         # 解析消息内容
         content = json.loads(new_message.content)

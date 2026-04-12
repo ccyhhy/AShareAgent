@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -33,15 +34,44 @@ def _is_truthy_env_var(env_var: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _ensure_agent_outputs(data: dict[str, object]) -> dict[str, object]:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
+def _has_meaningful_financial_metrics(financial_metrics: list[dict]) -> bool:
+    if not financial_metrics:
+        return False
+    first = financial_metrics[0] if isinstance(financial_metrics[0], dict) else {}
+    if not isinstance(first, dict):
+        return False
+    for value in first.values():
+        if isinstance(value, (int, float)) and value not in (0, 0.0):
+            return True
+    return False
 
 
-@agent_endpoint("market_data", "Market data collection and preprocessing")
+def _has_meaningful_financial_statements(financial_line_items: list[dict]) -> bool:
+    if not financial_line_items:
+        return False
+    for row in financial_line_items[:2]:
+        if not isinstance(row, dict):
+            continue
+        for key in ("revenue", "net_income", "free_cash_flow"):
+            value = row.get(key)
+            if isinstance(value, (int, float)) and value not in (0, 0.0):
+                return True
+    return False
+
+
+def _has_meaningful_market_data(market_data: dict) -> bool:
+    if not isinstance(market_data, dict) or not market_data:
+        return False
+    for key in ("current_price", "market_cap", "volume"):
+        value = market_data.get(key)
+        if isinstance(value, (int, float)) and value > 0:
+            return True
+    return False
+
+
+
+
+@agent_endpoint("market_data", "市场数据收集与预处理")
 def market_data_agent(state: AgentState):
     """Gather and normalize market/financial inputs for downstream agents."""
     show_workflow_status("Market Data Agent")
@@ -64,7 +94,7 @@ def market_data_agent(state: AgentState):
                 "financial_statements": False,
                 "market_data": False,
             },
-            "summary": "Ablation disabled market_data agent. Using empty deterministic payload.",
+            "summary": "Ablation 已禁用 market_data 节点，使用确定性空载荷。",
         },
     )
     if ablation_result is not None:
@@ -162,20 +192,65 @@ def market_data_agent(state: AgentState):
 
     prices_dict = prices_df.to_dict("records")
 
+    price_ok = len(prices_dict) > 0
+    metrics_ok = _has_meaningful_financial_metrics(financial_metrics)
+    statements_ok = _has_meaningful_financial_statements(financial_line_items)
+    market_ok = _has_meaningful_market_data(market_data)
+
+    missing_components = []
+    if not price_ok:
+        missing_components.append("price_history")
+    if not metrics_ok:
+        missing_components.append("financial_metrics")
+    if not statements_ok:
+        missing_components.append("financial_statements")
+    if not market_ok:
+        missing_components.append("market_data")
+
+    component_labels = {
+        "price_history": "价格历史",
+        "financial_metrics": "财务指标",
+        "financial_statements": "财务报表",
+        "market_data": "市场行情",
+    }
+    missing_components_cn = [component_labels.get(item, item) for item in missing_components]
+
+    if missing_components:
+        summary = (
+            f"已完成 {ticker} 在 {start_date} 至 {end_date} 区间的部分数据采集。"
+            f"缺失项：{', '.join(missing_components_cn)}。"
+        )
+    else:
+        summary = (
+            f"已完成 {ticker} 在 {start_date} 至 {end_date} 区间的数据采集，"
+            "包含价格历史、财务指标、财务报表与市场画像。"
+        )
+
+    coverage_ratio = round(
+        (4 - len(missing_components)) / 4,
+        2,
+    )
+
     market_data_summary = {
+        "agent_type": "data_layer",
+        "signal": "neutral",
+        "confidence": f"{int(coverage_ratio * 100)}%",
         "ticker": ticker,
         "start_date": start_date,
         "end_date": end_date,
         "data_collected": {
-            "price_history": len(prices_dict) > 0,
-            "financial_metrics": len(financial_metrics) > 0,
-            "financial_statements": len(financial_line_items) > 0,
-            "market_data": len(market_data) > 0,
+            "price_history": price_ok,
+            "financial_metrics": metrics_ok,
+            "financial_statements": statements_ok,
+            "market_data": market_ok,
         },
-        "summary": (
-            f"Collected market data for {ticker} from {start_date} to {end_date}, "
-            "including price history, financial metrics, and market profile."
-        ),
+        "data_quality": {
+            "missing_components": missing_components,
+            "missing_components_readable": missing_components_cn,
+            "coverage_ratio": coverage_ratio,
+        },
+        "reasoning": summary,
+        "summary": summary,
     }
 
     if show_reasoning:
@@ -205,3 +280,4 @@ def market_data_agent(state: AgentState):
         "data": updated_data,
         "metadata": state["metadata"],
     }
+

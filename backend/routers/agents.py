@@ -20,7 +20,8 @@ from ..models.api_models import (
 from ..state import api_state
 from ..utils.api_utils import serialize_for_api
 from ..utils.decision_formatter import format_decision_display
-from src.database.models import DatabaseManager, AgentModel, AgentDecisionModel
+from backend.dependencies import get_database_manager
+from src.database.models import AgentModel, AgentDecisionModel
 
 logger = logging.getLogger("agents_router")
 
@@ -28,7 +29,7 @@ logger = logging.getLogger("agents_router")
 router = APIRouter(prefix="/api/agents", tags=["Agents"])
 
 # 初始化数据库管理器
-db_manager = DatabaseManager()
+db_manager = get_database_manager()
 agent_model = AgentModel(db_manager)
 decision_model = AgentDecisionModel(db_manager)
 

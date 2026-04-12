@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -48,12 +49,6 @@ def _confidence_from_score(score: int) -> str:
     return f"{round(confidence * 100)}%"
 
 
-def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 def _with_relative_valuation_semantics(payload: dict[str, Any]) -> dict[str, Any]:
@@ -63,7 +58,7 @@ def _with_relative_valuation_semantics(payload: dict[str, Any]) -> dict[str, Any
     return enriched
 
 
-@agent_endpoint("technical_analyst", "估值分析师（规则引擎），基于PB历史百分位输出估值信号")
+@agent_endpoint("technical_analyst", "Technical analyst using PB percentile rule signals")
 def technical_analyst_agent(state: AgentState):
     show_workflow_status("Technical Analyst")
     show_reasoning = state["metadata"]["show_reasoning"]
@@ -94,7 +89,7 @@ def technical_analyst_agent(state: AgentState):
             "agent_type": "rule_engine",
             "signal": "neutral",
             "confidence": "35%",
-            "reasoning": "Missing ticker in state data.",
+            "reasoning": "状态数据中缺少股票代码，无法进行PB分位估值。",
             "pb_percentile_5y": None,
             "pb_current": None,
             "valuation_score": 50,
@@ -109,7 +104,7 @@ def technical_analyst_agent(state: AgentState):
                 "agent_type": "rule_engine",
                 "signal": "neutral",
                 "confidence": "35%",
-                "reasoning": f"No PB history found in local CSV for {ticker}.",
+                "reasoning": f"本地CSV中未找到 {ticker} 的PB历史数据。",
                 "pb_percentile_5y": None,
                 "pb_current": None,
                 "valuation_score": 50,
@@ -141,8 +136,8 @@ def technical_analyst_agent(state: AgentState):
                 "signal": signal,
                 "confidence": confidence,
                 "reasoning": (
-                    f"PB 5Y percentile={pb_percentile_5y:.2f}%, "
-                    f"current PB={current_pb:.4f}, valuation_score={valuation_score}."
+                    f"PB五年分位={pb_percentile_5y:.2f}%，"
+                    f"当前PB={current_pb:.4f}，估值得分={valuation_score}。"
                 ),
                 "pb_percentile_5y": round(pb_percentile_5y, 2),
                 "pb_current": round(current_pb, 4),
@@ -173,3 +168,4 @@ def technical_analyst_agent(state: AgentState):
         "data": updated_data,
         "metadata": state["metadata"],
     }
+

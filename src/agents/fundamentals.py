@@ -3,6 +3,7 @@ from src.utils.logging_config import setup_logger
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -10,20 +11,15 @@ from src.agents.state import (
 from src.utils.api_utils import agent_endpoint, log_llm_interaction
 
 import json
+import math
 from typing import Any
 
 from src.rag.knowledge_base import KnowledgeBase
 
-# 初始化 logger
+# 鍒濆鍖?logger
 logger = setup_logger('fundamentals_agent')
 
 
-def _ensure_agent_outputs(data: dict) -> dict:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 FUNDAMENTALS_MEMORY_LIMIT = 3
@@ -73,6 +69,29 @@ def _parse_confidence_percent(value: Any) -> float | None:
     if 0 <= score <= 1:
         score *= 100.0
     return max(0.0, min(score, 100.0))
+
+
+def _is_valid_metric(value: Any) -> bool:
+    if value is None:
+        return False
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return False
+    if math.isnan(number) or math.isinf(number):
+        return False
+    return True
+
+
+def _dimension_signal(score: int, available_count: int) -> str:
+    # When all inputs are missing, keep neutral to avoid false bearish confidence spikes.
+    if available_count == 0:
+        return "neutral"
+    if score >= 2:
+        return "bullish"
+    if score == 0:
+        return "bearish"
+    return "neutral"
 
 
 def _build_memory_delta(
@@ -233,24 +252,26 @@ def fundamentals_agent(state: AgentState):
         (net_margin, 0.20),  # Healthy profit margins
         (operating_margin, 0.15)  # Strong operating efficiency
     ]
+    profitability_available = sum(
+        1 for metric, _ in thresholds if _is_valid_metric(metric)
+    )
     profitability_score = sum(
-        metric is not None and metric > threshold
+        _is_valid_metric(metric) and float(metric) > threshold
         for metric, threshold in thresholds
     )
 
-    signals.append('bullish' if profitability_score >=
-                   2 else 'bearish' if profitability_score == 0 else 'neutral')
-    # 修复百分比显示问题：确保数值在合理范围内
+    signals.append(_dimension_signal(profitability_score, profitability_available))
+    # 淇鐧惧垎姣旀樉绀洪棶棰橈細纭繚鏁板€煎湪鍚堢悊鑼冨洿鍐?
     def format_percentage(value, name):
         if value is None:
             return f"{name}: N/A"
-        # 检查是否为极端异常值
-        if abs(value) > 10.0:  # 大于1000%的值视为异常
-            return f"{name}: N/A (异常值)"
-        # 检查是否为极端负增长（可能是数据质量问题）
-        if value < -1.0:  # 过小的值可能有问题，特别是对于收入和利润增长
-            return f"{name}: N/A (数据异常)"
-        # 如果值已经是小数形式(如0.1563)，直接格式化为百分比
+        # 妫€鏌ユ槸鍚︿负鏋佺寮傚父鍊?
+        if abs(value) > 10.0:  # 澶т簬1000%鐨勫€艰涓哄紓甯?
+            return f"{name}: N/A (寮傚父鍊?"
+        # 妫€鏌ユ槸鍚︿负鏋佺璐熷闀匡紙鍙兘鏄暟鎹川閲忛棶棰橈級
+        if value < -1.0:  # 杩囧皬鐨勫€煎彲鑳芥湁闂锛岀壒鍒槸瀵逛簬鏀跺叆鍜屽埄娑﹀闀?
+            return f"{name}: N/A (鏁版嵁寮傚父)"
+        # 濡傛灉鍊煎凡缁忔槸灏忔暟褰㈠紡(濡?.1563)锛岀洿鎺ユ牸寮忓寲涓虹櫨鍒嗘瘮
         return f"{name}: {value:.2%}"
     
     reasoning["profitability_signal"] = {
@@ -270,13 +291,15 @@ def fundamentals_agent(state: AgentState):
         (earnings_growth, 0.10),  # 10% earnings growth
         (book_value_growth, 0.10)  # 10% book value growth
     ]
+    growth_available = sum(
+        1 for metric, _ in thresholds if _is_valid_metric(metric)
+    )
     growth_score = sum(
-        metric is not None and metric > threshold
+        _is_valid_metric(metric) and float(metric) > threshold
         for metric, threshold in thresholds
     )
 
-    signals.append('bullish' if growth_score >=
-                   2 else 'bearish' if growth_score == 0 else 'neutral')
+    signals.append(_dimension_signal(growth_score, growth_available))
     reasoning["growth_signal"] = {
         "signal": signals[1],
         "details": format_percentage(metrics.get('revenue_growth'), "Revenue Growth") +
@@ -290,16 +313,26 @@ def fundamentals_agent(state: AgentState):
     earnings_per_share = metrics.get("earnings_per_share", None)
 
     health_score = 0
-    if current_ratio and current_ratio > 1.5:  # Strong liquidity
+    health_available = 0
+    if _is_valid_metric(current_ratio):
+        health_available += 1
+    if _is_valid_metric(debt_to_equity):
+        health_available += 1
+    if _is_valid_metric(free_cash_flow_per_share) and _is_valid_metric(earnings_per_share):
+        health_available += 1
+
+    if _is_valid_metric(current_ratio) and float(current_ratio) > 1.5:  # Strong liquidity
         health_score += 1
-    if debt_to_equity and debt_to_equity < 0.5:  # Conservative debt levels
+    if _is_valid_metric(debt_to_equity) and float(debt_to_equity) < 0.5:  # Conservative debt levels
         health_score += 1
-    if (free_cash_flow_per_share and earnings_per_share and
-            free_cash_flow_per_share > earnings_per_share * 0.8):  # Strong FCF conversion
+    if (
+        _is_valid_metric(free_cash_flow_per_share)
+        and _is_valid_metric(earnings_per_share)
+        and float(free_cash_flow_per_share) > float(earnings_per_share) * 0.8
+    ):  # Strong FCF conversion
         health_score += 1
 
-    signals.append('bullish' if health_score >=
-                   2 else 'bearish' if health_score == 0 else 'neutral')
+    signals.append(_dimension_signal(health_score, health_available))
     def format_ratio(value, name):
         if value is None or value == 0:
             return f"{name}: N/A"
@@ -321,13 +354,15 @@ def fundamentals_agent(state: AgentState):
         (price_to_book, 3),  # Reasonable P/B ratio
         (price_to_sales, 5)  # Reasonable P/S ratio
     ]
+    price_ratio_available = sum(
+        1 for metric, _ in thresholds if _is_valid_metric(metric)
+    )
     price_ratio_score = sum(
-        metric is not None and metric < threshold
+        _is_valid_metric(metric) and float(metric) < threshold
         for metric, threshold in thresholds
     )
 
-    signals.append('bullish' if price_ratio_score >=
-                   2 else 'bearish' if price_ratio_score == 0 else 'neutral')
+    signals.append(_dimension_signal(price_ratio_score, price_ratio_available))
     reasoning["price_ratios_signal"] = {
         "signal": signals[3],
         "details": format_ratio(pe_ratio, "P/E") +
@@ -335,20 +370,37 @@ def fundamentals_agent(state: AgentState):
                   ", " + format_ratio(price_to_sales, "P/S")
     }
 
-    # Determine overall signal
-    bullish_signals = signals.count('bullish')
-    bearish_signals = signals.count('bearish')
+    dimension_availability = [
+        profitability_available,
+        growth_available,
+        health_available,
+        price_ratio_available,
+    ]
+    informative_signals = [
+        signal for signal, available in zip(signals, dimension_availability) if available > 0
+    ]
 
-    if bullish_signals > bearish_signals:
-        overall_signal = 'bullish'
-    elif bearish_signals > bullish_signals:
-        overall_signal = 'bearish'
+    # Determine overall signal using only dimensions with available inputs.
+    if not informative_signals:
+        overall_signal = "neutral"
+        confidence = 0.35
     else:
-        overall_signal = 'neutral'
+        bullish_signals = informative_signals.count("bullish")
+        bearish_signals = informative_signals.count("bearish")
 
-    # Calculate confidence level
-    total_signals = len(signals)
-    confidence = max(bullish_signals, bearish_signals) / total_signals
+        if bullish_signals > bearish_signals:
+            overall_signal = "bullish"
+        elif bearish_signals > bullish_signals:
+            overall_signal = "bearish"
+        else:
+            overall_signal = "neutral"
+
+        confidence = max(bullish_signals, bearish_signals) / len(informative_signals)
+        coverage_ratio = len(informative_signals) / len(signals)
+        if coverage_ratio < 0.5:
+            confidence = min(confidence, 0.55)
+        confidence = max(0.35, min(confidence, 0.95))
+
     confidence_text = f"{round(confidence * 100)}%"
     memory_delta = _build_memory_delta(
         current_signal=overall_signal,
@@ -356,6 +408,15 @@ def fundamentals_agent(state: AgentState):
         retrieved_refs=retrieved_refs,
     )
     reasoning["memory_comparison"] = memory_delta["summary"]
+    reasoning["data_quality"] = {
+        "available_dimensions": f"{len(informative_signals)}/{len(signals)}",
+        "coverage_ratio": round(len(informative_signals) / len(signals), 2),
+        "note": (
+            "Fundamental inputs are sparse; confidence has been capped."
+            if len(informative_signals) < len(signals)
+            else "Fundamental inputs are sufficiently complete."
+        ),
+    }
 
     message_content = {
         "agent_type": "rule_engine",
@@ -378,7 +439,7 @@ def fundamentals_agent(state: AgentState):
     if show_reasoning:
         show_agent_reasoning(message_content, "Fundamental Analysis Agent")
     
-    # 始终保存推理信息到metadata供API使用
+    # 濮嬬粓淇濆瓨鎺ㄧ悊淇℃伅鍒癿etadata渚汚PI浣跨敤
     updated_data = dict(data)
     agent_outputs = _ensure_agent_outputs(updated_data)
     agent_outputs["fundamentals"] = message_content
@@ -394,7 +455,7 @@ def fundamentals_agent(state: AgentState):
             knowledge_base.save_fundamentals_memory(
                 stock_code=str(stock_code),
                 analysis_payload=memory_payload,
-                run_id=data.get("run_id"),
+                run_id=state.get("metadata", {}).get("run_id"),
                 analysis_date=data.get("end_date"),
             )
         except Exception as exc:
@@ -407,3 +468,4 @@ def fundamentals_agent(state: AgentState):
         "data": updated_data,
         "metadata": state["metadata"],
     }
+

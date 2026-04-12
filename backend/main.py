@@ -27,11 +27,11 @@ app = FastAPI(
 
 # 初始化双写日志系统
 from src.utils.dual_logger import get_dual_logger, logger_manager
-from src.database.models import DatabaseManager
+from backend.dependencies import get_database_manager
 
 # 初始化数据库和日志系统
 try:
-    db_manager = DatabaseManager()
+    db_manager = get_database_manager()
     logger_manager.set_database_manager(db_manager)
     logger = get_dual_logger('backend')
     logger.info("后端服务启动，双写日志系统已初始化")

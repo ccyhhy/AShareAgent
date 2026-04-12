@@ -5,14 +5,14 @@
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, EmailStr, validator
-from passlib.context import CryptContext
+import bcrypt
 import secrets
 from jose import jwt, JWTError
 from src.database.models import DatabaseManager
 
 
 # 密码加密上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+_MAX_BCRYPT_PASSWORD_BYTES = 72
 
 # JWT配置
 SECRET_KEY = secrets.token_urlsafe(32)
@@ -135,14 +135,34 @@ class UserAuthService:
     
     def __init__(self, db_manager: DatabaseManager):
         self.db = db_manager
+
+    @staticmethod
+    def _password_to_bytes(password: str) -> bytes:
+        """Convert password string to bcrypt-safe bytes."""
+        if not isinstance(password, str):
+            raise ValueError("密码格式无效")
+
+        password_bytes = password.encode("utf-8")
+        if len(password_bytes) > _MAX_BCRYPT_PASSWORD_BYTES:
+            raise ValueError("密码长度不能超过72字节")
+        return password_bytes
     
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """验证密码"""
-        return pwd_context.verify(plain_password, hashed_password)
+        try:
+            return bcrypt.checkpw(
+                self._password_to_bytes(plain_password),
+                hashed_password.encode("utf-8"),
+            )
+        except Exception:
+            return False
     
     def get_password_hash(self, password: str) -> str:
         """获取密码哈希"""
-        return pwd_context.hash(password)
+        return bcrypt.hashpw(
+            self._password_to_bytes(password),
+            bcrypt.gensalt(),
+        ).decode("utf-8")
     
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """创建访问令牌"""

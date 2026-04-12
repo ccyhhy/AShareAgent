@@ -31,7 +31,7 @@ def get_latest_message_by_name(messages: list, name: str):
             return msg
     logger.debug("Message from agent '%s' not found in portfolio_management_agent.", name)
     return HumanMessage(
-        content=json.dumps({"signal": "error", "details": f"Message from {name} not found"}),
+        content=json.dumps({"signal": "error", "details": f"缺少 {name} 的输出"}),
         name=name,
     )
 
@@ -73,6 +73,8 @@ def _as_prompt_payload(payload: dict[str, Any] | None, fallback_content: str, fa
 
 def _default_decision() -> dict[str, Any]:
     return {
+        "agent_type": "llm",
+        "signal": "neutral",
         "action": "hold",
         "quantity": 0,
         "confidence": 0.7,
@@ -90,7 +92,7 @@ def _default_decision() -> dict[str, Any]:
             {"agent_name": "bull_researcher", "signal": "neutral", "confidence": 0.0},
             {"agent_name": "bear_researcher", "signal": "neutral", "confidence": 0.0},
         ],
-        "reasoning": "LLM API error. Defaulting to conservative hold based on risk management.",
+        "reasoning": "LLM接口异常，按风控优先原则回退为保守持有。",
     }
 
 
@@ -113,7 +115,7 @@ def portfolio_management_agent(state: AgentState):
     if ablation_reason is not None:
         decision_json = _default_decision()
         decision_json["reasoning"] = (
-            f"{ablation_reason} Final decision forced to deterministic hold."
+            f"{ablation_reason} 已强制回退为确定性持有决策。"
         )
         final_decision_message = HumanMessage(
             content=json.dumps(decision_json, ensure_ascii=False),
@@ -183,77 +185,76 @@ def portfolio_management_agent(state: AgentState):
     technical_content = _as_prompt_payload(
         technical_payload,
         technical_message.content if technical_message else "",
-        "Relative valuation message missing",
+        "缺少相对估值信号",
     )
     fundamentals_content = _as_prompt_payload(
         fundamentals_payload,
         fundamentals_message.content if fundamentals_message else "",
-        "Fundamentals message missing",
+        "缺少基本面信号",
     )
     sentiment_content = _as_prompt_payload(
         sentiment_payload,
         sentiment_message.content if sentiment_message else "",
-        "Market sentiment message missing",
+        "缺少市场情绪信号",
     )
     valuation_content = _as_prompt_payload(
         valuation_payload,
         valuation_message.content if valuation_message else "",
-        "Valuation message missing",
+        "缺少估值信号",
     )
     risk_content = _as_prompt_payload(
         risk_payload,
         risk_message.content if risk_message else "",
-        "Risk message missing",
+        "缺少风险管理信号",
     )
     macro_content = _as_prompt_payload(
         macro_payload,
         macro_message.content if macro_message else "",
-        "Macro message missing",
+        "缺少宏观信号",
     )
     bull_researcher_content = bull_researcher_message.content if bull_researcher_message else json.dumps(
-        {"signal": "error", "details": "Bull researcher message missing"}
+        {"signal": "error", "details": "缺少多头研究员输出"}
     )
     bear_researcher_content = bear_researcher_message.content if bear_researcher_message else json.dumps(
-        {"signal": "error", "details": "Bear researcher message missing"}
+        {"signal": "error", "details": "缺少空头研究员输出"}
     )
 
     market_wide_news_summary_content = state["data"].get(
         "macro_news_analysis_result",
-        "Market-wide macro news summary is unavailable.",
+        "暂无可用的全市场宏观新闻摘要。",
     )
 
-    system_message_content = """You are a portfolio manager making final trading decisions.
-Use all signals and produce JSON only.
+    system_message_content = """你是A股组合经理，负责生成最终交易决策。请综合全部信号并仅返回JSON。
 
-Preferred semantics and keys:
-- Use `relative_valuation_analysis` as the preferred name for PB-percentile valuation-position signal.
-- `technical_analysis` is accepted as a compatibility alias.
-- `sentiment_analysis` means market sentiment from recent news.
+语义约定：
+- `relative_valuation_analysis` 是PB分位估值信号的首选名称。
+- `technical_analysis` 仅作为兼容别名。
+- `sentiment_analysis` 指基于近期新闻的市场情绪。
 
-Required JSON fields:
+必填JSON字段：
 - action: buy | sell | hold
-- quantity: positive integer
-- confidence: float between 0 and 1
-- agent_signals: list of objects with agent_name, signal, confidence
-- reasoning: concise decision explanation
-- ashare_considerations: A-share specific considerations (optional)
+- quantity: 正整数
+- confidence: 0到1之间的小数
+- agent_signals: 列表，元素包含 agent_name、signal、confidence
+- reasoning: 中文简明决策理由
+- ashare_considerations: A股特有约束或注意事项（可选）
 """
 
-    user_message_content = f"""Based on the team's analysis below, make the final trading decision.
+    user_message_content = f"""请基于以下团队分析给出最终交易决策（仅JSON）：
 
-Relative Valuation Signal (PB Percentile, prefer structured agent_outputs): {technical_content}
-Fundamental Analysis Signal (prefer structured agent_outputs): {fundamentals_content}
-Market Sentiment Signal (News-based, prefer structured agent_outputs): {sentiment_content}
-Valuation Analysis Signal (prefer structured agent_outputs): {valuation_content}
-Risk Management Signal (prefer structured agent_outputs): {risk_content}
-Macro Stock-Level Analysis Signal (post-risk stage): {macro_content}
-Macro Market-Wide News Summary Signal (parallel stage): {market_wide_news_summary_content}
-Bull Researcher Analysis: {bull_researcher_content}
-Bear Researcher Analysis: {bear_researcher_content}
+相对估值信号（PB分位，优先使用 structured agent_outputs）：{technical_content}
+基本面信号（优先使用 structured agent_outputs）：{fundamentals_content}
+市场情绪信号（新闻口径，优先使用 structured agent_outputs）：{sentiment_content}
+估值信号（优先使用 structured agent_outputs）：{valuation_content}
+风险管理信号（优先使用 structured agent_outputs）：{risk_content}
+个股宏观信号（风险后阶段）：{macro_content}
+全市场宏观新闻摘要（并行阶段）：{market_wide_news_summary_content}
+多头研究员观点：{bull_researcher_content}
+空头研究员观点：{bear_researcher_content}
 
-Portfolio state:
-- cash: {portfolio.get('cash', 0.0):.2f}
-- stock position: {portfolio.get('stock', 0)}
+组合状态：
+- 现金：{portfolio.get('cash', 0.0):.2f}
+- 持仓股数：{portfolio.get('stock', 0)}
 """
 
     llm_interaction_messages = [
@@ -263,18 +264,18 @@ Portfolio state:
 
     if _is_backtest_mode():
         show_agent_reasoning(
+            "当前为回测模式，跳过远程LLM调用并使用确定性保守决策。",
             agent_name,
-            "Backtest mode active. Skip remote LLM call and use deterministic conservative decision.",
         )
         llm_response_content = None
         decision_json = _default_decision()
         decision_json["reasoning"] = (
-            "Backtest mode active. Remote LLM call skipped; using deterministic conservative hold decision."
+            "当前为回测模式，已跳过远程LLM调用并采用确定性保守持有决策。"
         )
     else:
         show_agent_reasoning(
+            "正在汇总相对估值、基本面、情绪、估值、风控、宏观与多空研究观点，准备调用LLM。",
             agent_name,
-            "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
         )
 
         def call_llm():
@@ -295,7 +296,7 @@ Portfolio state:
         log_llm_interaction(state)(lambda: llm_response_content)()
 
         if llm_response_content is None:
-            show_agent_reasoning(agent_name, "LLM call failed. Using default conservative decision.")
+            show_agent_reasoning("LLM调用失败，回退为默认保守决策。", agent_name)
             decision_json = _default_decision()
         else:
             decision_json = _safe_json_loads(llm_response_content, _default_decision())
@@ -326,6 +327,16 @@ Portfolio state:
                     }
                 )
 
+    decision_json.setdefault("agent_type", "llm")
+    if not decision_json.get("signal"):
+        action_text = str(decision_json.get("action", "")).strip().lower()
+        if action_text == "buy":
+            decision_json["signal"] = "bullish"
+        elif action_text == "sell":
+            decision_json["signal"] = "bearish"
+        else:
+            decision_json["signal"] = "neutral"
+
     llm_response_content = json.dumps(decision_json, ensure_ascii=False)
 
     final_decision_message = HumanMessage(
@@ -334,7 +345,7 @@ Portfolio state:
     )
 
     if show_reasoning_flag:
-        show_agent_reasoning(agent_name, f"Final LLM decision JSON: {llm_response_content}")
+        show_agent_reasoning(f"Final LLM decision JSON: {llm_response_content}", agent_name)
 
     agent_decision_details_value = {
         "action": decision_json.get("action"),

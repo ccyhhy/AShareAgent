@@ -19,7 +19,9 @@ AGENT_MAP = {
     "fundamentals_agent": {"icon": "FA", "name": "fundamentals"},
     "sentiment_agent": {"icon": "SM", "name": "market_sentiment"},
     "valuation_agent": {"icon": "VA", "name": "valuation"},
+    "researcher_bull": {"icon": "BU", "name": "researcher_bull"},
     "researcher_bull_agent": {"icon": "BU", "name": "researcher_bull"},
+    "researcher_bear": {"icon": "BE", "name": "researcher_bear"},
     "researcher_bear_agent": {"icon": "BE", "name": "researcher_bear"},
     "debate_room_agent": {"icon": "DB", "name": "debate_room"},
     "risk_management_agent": {"icon": "RK", "name": "risk_management"},
@@ -34,8 +36,8 @@ AGENT_ORDER = [
     "fundamentals_agent",
     "sentiment_agent",
     "valuation_agent",
-    "researcher_bull_agent",
-    "researcher_bear_agent",
+    "researcher_bull",
+    "researcher_bear",
     "debate_room_agent",
     "risk_management_agent",
     "macro_analyst_agent",
@@ -105,7 +107,12 @@ class StructuredTerminalOutput:
                 if "strategy_signals" in data:
                     lines.append("- legacy_strategy_signals:")
                     lines.extend([f"  {line}" for line in self._format_dict_as_tree(data.get("strategy_signals", {}))])
-            elif agent_name in {"researcher_bull_agent", "researcher_bear_agent"}:
+            elif agent_name in {
+                "researcher_bull",
+                "researcher_bull_agent",
+                "researcher_bear",
+                "researcher_bear_agent",
+            }:
                 lines.append(f"- perspective: {data.get('perspective', 'N/A')}")
                 lines.append(f"- confidence: {self._format_value(data.get('confidence'))}")
                 for point in data.get("thesis_points", []):
@@ -150,7 +157,11 @@ def extract_agent_data(state: Dict[str, Any], agent_name: str) -> Any:
     """Extract agent-specific data from final workflow state."""
     if agent_name == "portfolio_management_agent":
         messages = state.get("messages", [])
-        if messages and hasattr(messages[-1], "content"):
+        if (
+            messages
+            and hasattr(messages[-1], "content")
+            and getattr(messages[-1], "name", None) == "portfolio_management_agent"
+        ):
             content = messages[-1].content
             if isinstance(content, str):
                 try:

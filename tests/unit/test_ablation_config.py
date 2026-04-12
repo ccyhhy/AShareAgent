@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from src.agents.state import (
+    _ensure_agent_outputs,
     get_ablation_disable_reason,
     maybe_return_ablation_stub,
     resolve_ablation_config,
@@ -70,3 +71,12 @@ def test_build_ablation_config_supports_remove_single_agent():
     )
     assert config["profile"] == "remove_single_agent_x"
     assert config["remove_single_agent"] == "sentiment"
+
+
+def test_ensure_agent_outputs_normalizes_non_dict_values():
+    data = {"agent_outputs": ["bad-shape"]}
+
+    result = _ensure_agent_outputs(data)
+
+    assert result == {}
+    assert data["agent_outputs"] is result

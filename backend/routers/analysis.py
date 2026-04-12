@@ -9,7 +9,7 @@ import uuid
 import logging
 import json
 from datetime import datetime, timezone
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 from backend.models.api_models import (
     ApiResponse, StockAnalysisRequest, StockAnalysisResponse
@@ -30,6 +30,160 @@ from src.database.models import DatabaseManager
 
 logger = logging.getLogger("analysis_router")
 
+
+ANALYSIS_STAGE_CONFIG = [
+    {
+        "key": "market_data",
+        "title": "市场数据",
+        "description": "收集行情、财务与基础资料。",
+        "agents": ["market_data"],
+    },
+    {
+        "key": "core_analysis",
+        "title": "多维分析",
+        "description": "技术面、基本面、情绪、估值与宏观新闻并行分析。",
+        "agents": [
+            "technical_analyst",
+            "fundamentals",
+            "sentiment",
+            "valuation",
+            "macro_news_agent",
+        ],
+    },
+    {
+        "key": "research",
+        "title": "研究员观点",
+        "description": "看多与看空研究员形成初步结论。",
+        "agents": ["researcher_bull", "researcher_bear"],
+    },
+    {
+        "key": "debate",
+        "title": "多空辩论",
+        "description": "整合正反观点，形成辩论结论。",
+        "agents": ["debate_room"],
+    },
+    {
+        "key": "risk",
+        "title": "风险审查",
+        "description": "评估仓位、波动和交易风险。",
+        "agents": ["risk_management"],
+    },
+    {
+        "key": "macro",
+        "title": "宏观影响",
+        "description": "判断宏观与政策对个股的影响。",
+        "agents": ["macro_analyst"],
+    },
+    {
+        "key": "decision",
+        "title": "最终决策",
+        "description": "投资组合经理输出最终建议。",
+        "agents": ["portfolio_management"],
+    },
+]
+
+AGENT_DISPLAY_NAMES = {
+    "market_data": "市场数据分析",
+    "technical_analyst": "技术面分析",
+    "fundamentals": "基本面分析",
+    "sentiment": "市场情绪分析",
+    "valuation": "估值分析",
+    "macro_news_agent": "宏观新闻分析",
+    "researcher_bull": "看多研究员",
+    "researcher_bear": "看空研究员",
+    "debate_room": "多空辩论",
+    "risk_management": "风险管理",
+    "macro_analyst": "宏观影响分析",
+    "portfolio_management": "投资组合经理",
+}
+
+
+def _build_analysis_stage_progress(run_id: str, task_status: str) -> Dict[str, Any]:
+    run_agent_states = api_state.get_run_agent_states(run_id)
+    stages: List[Dict[str, Any]] = []
+    current_stage: Optional[Dict[str, Any]] = None
+    completed_count = 0
+    total_stage_count = len(ANALYSIS_STAGE_CONFIG)
+
+    for stage in ANALYSIS_STAGE_CONFIG:
+        agent_statuses = [
+            (run_agent_states.get(agent_name) or {}).get("status")
+            for agent_name in stage["agents"]
+        ]
+        agent_statuses = [state for state in agent_statuses if state]
+
+        if task_status == "completed":
+            stage_status = "completed"
+        elif any(state == "error" for state in agent_statuses):
+            stage_status = "error"
+        elif agent_statuses and all(state == "completed" for state in agent_statuses):
+            stage_status = "completed"
+        elif any(state == "running" for state in agent_statuses):
+            stage_status = "running"
+        elif agent_statuses:
+            stage_status = "running"
+        else:
+            stage_status = "pending"
+
+        stage_payload = {
+            "key": stage["key"],
+            "title": stage["title"],
+            "description": stage["description"],
+            "status": stage_status,
+            "agents": [
+                {
+                    "key": agent_name,
+                    "label": AGENT_DISPLAY_NAMES.get(agent_name, agent_name),
+                    "status": (run_agent_states.get(agent_name) or {}).get("status", "pending"),
+                }
+                for agent_name in stage["agents"]
+            ],
+        }
+        stages.append(stage_payload)
+
+        if stage_status == "completed":
+            completed_count += 1
+        elif current_stage is None:
+            current_stage = stage_payload
+
+    if task_status == "completed":
+        progress_percent = 100
+    else:
+        progress_percent = round((completed_count / total_stage_count) * 100)
+        if current_stage and current_stage["status"] == "running":
+            progress_percent += round(100 / (total_stage_count * 2))
+        progress_percent = min(progress_percent, 99)
+
+    active_agents = []
+    if current_stage:
+        active_agents = [
+            agent["label"]
+            for agent in current_stage["agents"]
+            if agent["status"] == "running"
+        ]
+
+    if task_status == "completed":
+        progress_text = "分析已完成，结果已生成。"
+    elif task_status == "failed":
+        failed_stage = current_stage["title"] if current_stage else "执行阶段"
+        progress_text = f"分析失败，停止在“{failed_stage}”。"
+    elif current_stage:
+        progress_text = (
+            f"已完成 {completed_count}/{total_stage_count} 个阶段，"
+            f"当前正在执行“{current_stage['title']}”。"
+        )
+    else:
+        progress_text = "任务已创建，等待开始执行。"
+
+    return {
+        "progress_percent": progress_percent,
+        "progress_text": progress_text,
+        "current_stage": current_stage,
+        "stages": stages,
+        "active_agents": active_agents,
+        "completed_stage_count": completed_count if task_status != "completed" else total_stage_count,
+        "total_stage_count": total_stage_count,
+    }
 
 def execute_stock_analysis_with_user(request, run_id: str, user_id: int, db_manager: DatabaseManager):
     """执行股票分析，支持用户关联和数据库记录"""
@@ -58,6 +212,7 @@ def execute_stock_analysis_with_user(request, run_id: str, user_id: int, db_mana
         with db_manager.get_connection() as conn:
             conn.execute(update_query, ("completed", datetime.now(), result_json, run_id))
             conn.commit()
+        api_state.complete_run(run_id, "completed")
             
         logger.info(f"分析任务 {run_id} 状态已更新为completed")
         
@@ -75,6 +230,7 @@ def execute_stock_analysis_with_user(request, run_id: str, user_id: int, db_mana
         with db_manager.get_connection() as conn:
             conn.execute(error_query, ("failed", datetime.now(), str(e), run_id))
             conn.commit()
+        api_state.complete_run(run_id, "error")
         
         raise e
 
@@ -157,6 +313,8 @@ async def start_stock_analysis(
             conn.commit()
         
         # 将任务提交到线程池
+        api_state.register_run(task_id)
+
         future = api_state._executor.submit(
             execute_stock_analysis_with_user,
             request=request,
@@ -165,11 +323,7 @@ async def start_stock_analysis(
             db_manager=db_manager
         )
 
-        # 注册任务
         api_state.register_analysis_task(task_id, future)
-
-        # 注册运行
-        api_state.register_run(task_id)
 
         # 创建响应对象
         response = StockAnalysisResponse(
@@ -296,6 +450,7 @@ async def get_analysis_status(
         # 获取内存中的任务状态
         task = api_state.get_analysis_task(run_id)
         run_info = api_state.get_run(run_id)
+        stage_progress = _build_analysis_stage_progress(run_id, task_data["status"])
         
         status_data = {
             "task_id": task_data["task_id"],
@@ -304,7 +459,14 @@ async def get_analysis_status(
             "created_at": task_data["created_at"],
             "started_at": task_data["started_at"],
             "completed_at": task_data["completed_at"],
-            "error_message": task_data["error_message"]
+            "error_message": task_data["error_message"],
+            "progress": stage_progress["progress_text"],
+            "progress_percent": stage_progress["progress_percent"],
+            "current_stage": stage_progress["current_stage"],
+            "stages": stage_progress["stages"],
+            "active_agents": stage_progress["active_agents"],
+            "completed_stage_count": stage_progress["completed_stage_count"],
+            "total_stage_count": stage_progress["total_stage_count"],
         }
         
         # 如果任务还在内存中运行，获取实时状态
@@ -510,3 +672,4 @@ async def delete_analysis_task(
             message=f"删除任务失败: {str(e)}",
             data=False
         )
+

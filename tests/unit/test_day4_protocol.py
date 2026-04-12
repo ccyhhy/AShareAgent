@@ -164,6 +164,39 @@ def test_sentiment_agent_writes_stable_agent_outputs():
 
 
 @pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_sentiment_agent_filters_news_relative_to_historical_end_date():
+    state = _base_state()
+    state["data"]["end_date"] = "2024-01-10"
+    mock_news = [
+        {
+            "title": "Historical in-window news",
+            "content": "Within seven-day historical window.",
+            "publish_time": "2024-01-08 10:00:00",
+        },
+        {
+            "title": "Historical expired news",
+            "content": "Outside seven-day historical window.",
+            "publish_time": "2023-12-20 10:00:00",
+        },
+    ]
+
+    captured = {}
+
+    def fake_news_sentiment(news_list, num_of_news=5):
+        captured["titles"] = [item["title"] for item in news_list]
+        return 0.1
+
+    with patch("src.agents.sentiment.get_stock_news", return_value=mock_news), patch(
+        "src.agents.sentiment.get_news_sentiment", side_effect=fake_news_sentiment
+    ):
+        result = sentiment_agent(state)
+
+    agent_output = result["data"]["agent_outputs"]["sentiment"]
+    assert captured["titles"] == ["Historical in-window news"]
+    assert agent_output["news_count"] == 1
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
 def test_macro_analyst_agent_writes_stable_agent_outputs():
     state = _base_state()
     mock_news = [

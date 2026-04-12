@@ -10,6 +10,7 @@ from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -49,12 +50,6 @@ def _to_confidence(value: Any) -> float:
     return max(0.0, min(score, 1.0))
 
 
-def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 @agent_endpoint("debate_room", "Debate room that balances bull and bear researcher views")
@@ -76,10 +71,10 @@ def debate_room_agent(state: AgentState):
             "confidence_diff": 0.0,
             "adjusted_confidence_diff": 0.0,
             "llm_score": 0.0,
-            "llm_analysis": "Ablation disabled debate_room agent.",
-            "llm_reasoning": "Neutral deterministic fallback.",
+            "llm_analysis": "Ablation 已禁用 debate_room 节点。",
+            "llm_reasoning": "使用确定性中性回退结果。",
             "mixed_confidence_diff": 0.0,
-            "debate_summary": ["Ablation disabled debate room debate synthesis."],
+            "debate_summary": ["Ablation 已禁用辩论室综合环节。"],
             "ashare_factors": {
                 "policy_sensitivity": False,
                 "liquidity_concerns": False,
@@ -152,9 +147,9 @@ def debate_room_agent(state: AgentState):
     bull_points = [str(p) for p in bull_thesis.get("thesis_points", []) if str(p).strip()]
     bear_points = [str(p) for p in bear_thesis.get("thesis_points", []) if str(p).strip()]
 
-    debate_summary = ["Bullish Arguments:"]
+    debate_summary = ["多头观点："]
     debate_summary.extend([f"+ {point}" for point in bull_points])
-    debate_summary.append("\nBearish Arguments:")
+    debate_summary.append("\n空头观点：")
     debate_summary.extend([f"- {point}" for point in bear_points])
 
     llm_analysis: dict[str, Any] | None = None
@@ -162,20 +157,20 @@ def debate_room_agent(state: AgentState):
 
     if _is_backtest_mode():
         llm_analysis = {
-            "analysis": "Backtest mode active. Third-party LLM debate scoring skipped.",
+            "analysis": "当前为回测模式，已跳过第三方LLM辩论评分。",
             "score": 0.0,
-            "reasoning": "Deterministic fallback for reproducibility.",
+            "reasoning": "为保证可复现性，使用确定性回退结果。",
         }
     else:
         prompt_parts = [
-            "Analyze the following bull and bear theses and return JSON with fields analysis, score, reasoning.",
-            f"BULL confidence={bull_confidence}: {bull_points}",
-            f"BEAR confidence={bear_confidence}: {bear_points}",
+            "请分析以下多空观点，并只返回JSON，字段必须包含 analysis、score、reasoning。",
+            f"多头置信度={bull_confidence}: {bull_points}",
+            f"空头置信度={bear_confidence}: {bear_points}",
         ]
         messages = [
             {
                 "role": "system",
-                "content": "You are a professional financial analyst. Reply in valid JSON only.",
+                "content": "你是专业A股分析师。请仅返回合法JSON，reasoning 使用中文。",
             },
             {"role": "user", "content": "\n".join(prompt_parts)},
         ]
@@ -193,16 +188,16 @@ def debate_room_agent(state: AgentState):
         except Exception as exc:
             logger.error("LLM call failed in debate_room_agent: %s", exc)
             llm_analysis = {
-                "analysis": "LLM API call failed",
+                "analysis": "LLM接口调用失败",
                 "score": 0.0,
-                "reasoning": "API error",
+                "reasoning": "接口错误",
             }
 
     if llm_analysis is None:
         llm_analysis = {
-            "analysis": "No valid LLM analysis returned",
+            "analysis": "未获得有效LLM分析结果",
             "score": 0.0,
-            "reasoning": "Fallback",
+            "reasoning": "使用回退结果",
         }
 
     confidence_diff = bull_confidence - bear_confidence
@@ -217,10 +212,10 @@ def debate_room_agent(state: AgentState):
         "sentiment_extreme": 0.0,
     }
 
-    if "policy" in bull_reasoning.lower() or "policy" in bear_reasoning.lower():
+    if "policy" in bull_reasoning.lower() or "policy" in bear_reasoning.lower() or "政策" in bull_reasoning or "政策" in bear_reasoning:
         ashare_adjustments["policy_factor"] = 0.1 if bull_confidence > bear_confidence else -0.1
 
-    if "liquidity" in bear_reasoning.lower():
+    if "liquidity" in bear_reasoning.lower() or "流动性" in bear_reasoning:
         ashare_adjustments["liquidity_factor"] = -0.05
 
     if abs(confidence_diff) > 0.7:
@@ -234,33 +229,50 @@ def debate_room_agent(state: AgentState):
 
     market_volatility = abs(confidence_diff)
     adaptive_threshold = 0.1 + min(market_volatility * 0.1, 0.05)
+    direction_conflict = confidence_diff * mixed_confidence_diff < 0 and abs(confidence_diff) >= 0.15
 
     special_conditions = {
         "policy_sensitive": ashare_adjustments["policy_factor"] != 0,
         "high_volatility": market_volatility > 0.6,
         "extreme_sentiment": abs(adjusted_confidence_diff) > 0.8,
         "liquidity_concern": ashare_adjustments["liquidity_factor"] < 0,
+        "direction_conflict": direction_conflict,
     }
 
     if abs(mixed_confidence_diff) < adaptive_threshold:
         final_signal = "neutral"
         confidence = max(bull_confidence, bear_confidence)
-        reasoning = f"Balanced debate; both sides have merit. threshold={adaptive_threshold:.3f}"
+        reasoning = f"多空观点较均衡，双方均有依据。阈值={adaptive_threshold:.3f}"
+    elif direction_conflict and abs(llm_score) < 0.5:
+        final_signal = "neutral"
+        confidence = max(bull_confidence, bear_confidence) * 0.85
+        reasoning = (
+            "方向冲突：研究员置信差与融合分数方向不一致，"
+            "LLM优势不足以覆盖冲突，结论降级为中性。"
+        )
     elif mixed_confidence_diff > 0:
         final_signal = "bullish"
         confidence = bull_confidence
-        reasoning = f"Bullish tilt after debate. score={mixed_confidence_diff:.3f}"
+        reasoning = f"辩论后结论偏多。综合得分={mixed_confidence_diff:.3f}"
     else:
         final_signal = "bearish"
         confidence = bear_confidence
-        reasoning = f"Bearish tilt after debate. score={mixed_confidence_diff:.3f}"
+        reasoning = f"辩论后结论偏空。综合得分={mixed_confidence_diff:.3f}"
 
     if special_conditions["policy_sensitive"]:
-        reasoning += " | policy-sensitive"
+        reasoning += " | 政策敏感"
     if special_conditions["liquidity_concern"]:
-        reasoning += " | liquidity concern"
+        reasoning += " | 流动性压力"
     if special_conditions["high_volatility"]:
-        reasoning += " | high volatility"
+        reasoning += " | 高波动"
+    if special_conditions["direction_conflict"]:
+        reasoning += " | 方向冲突"
+    reasoning += (
+        " | 组成项："
+        f"bull={bull_confidence:.3f}, bear={bear_confidence:.3f}, "
+        f"adjusted_diff={adjusted_confidence_diff:.3f}, llm_score={llm_score:.3f}, "
+        f"mixed={mixed_confidence_diff:.3f}, threshold={adaptive_threshold:.3f}"
+    )
 
     max_conf = max(bull_confidence, bear_confidence)
     min_conf = min(bull_confidence, bear_confidence)
@@ -285,6 +297,7 @@ def debate_room_agent(state: AgentState):
         "ashare_factors": {
             "policy_sensitivity": special_conditions["policy_sensitive"],
             "liquidity_concerns": special_conditions["liquidity_concern"],
+            "direction_conflict": special_conditions["direction_conflict"],
             "volatility_level": market_volatility,
             "adaptive_threshold": adaptive_threshold,
             "adjustments_applied": ashare_adjustments,
@@ -329,3 +342,4 @@ def debate_room_agent(state: AgentState):
             "special_conditions": special_conditions,
         },
     }
+

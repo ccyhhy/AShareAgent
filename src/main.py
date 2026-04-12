@@ -1,3 +1,10 @@
+import os
+os.environ["NO_PROXY"] = "*"
+os.environ["http_proxy"] = ""
+os.environ["https_proxy"] = ""
+os.environ["HTTP_PROXY"] = ""
+os.environ["HTTPS_PROXY"] = ""
+
 import sys
 import argparse
 import uuid  # Import uuid for run IDs

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Avatar, Button, Dropdown, Input, Layout, Menu, Space, Typography } from 'antd';
+import { Avatar, Button, Dropdown, Input, Layout, Menu, Space, Typography, ConfigProvider, theme } from 'antd';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   BarChartOutlined,
   BellOutlined,
@@ -17,6 +18,8 @@ import {
   SearchOutlined,
   SettingOutlined,
   UserOutlined,
+  MoonOutlined,
+  SunOutlined,
 } from '@ant-design/icons';
 import AnalysisForm from './components/AnalysisForm';
 import AnalysisStatus from './components/AnalysisStatus';
@@ -89,6 +92,21 @@ function App() {
   const [backtestResult, setBacktestResult] = useState<any>(null);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return localStorage.getItem('theme') === 'dark';
+  });
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.body.classList.add('dark');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.body.classList.remove('dark');
+      localStorage.setItem('theme', 'light');
+    }
+  }, [isDarkMode]);
+
+  const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -252,6 +270,16 @@ function App() {
     selectedMenu === 'backtest' && currentBacktestId ? currentBacktestId : currentRunId;
 
   return (
+    <ConfigProvider
+      theme={{
+        algorithm: isDarkMode ? theme.darkAlgorithm : theme.defaultAlgorithm,
+        token: {
+          colorPrimary: '#1b4dd8',
+          fontFamily: 'Inter, Segoe UI, sans-serif',
+          borderRadius: 12,
+        },
+      }}
+    >
     <Layout className="app-shell">
       <Sider width={248} className="app-sider" breakpoint="lg" collapsedWidth="0">
         <div className="sider-brand">
@@ -305,6 +333,12 @@ function App() {
             </div>
             <Button type="text" className="header-icon-button" icon={<ReloadOutlined />} />
             <Button type="text" className="header-icon-button" icon={<BellOutlined />} />
+            <Button
+              type="text"
+              className="header-icon-button"
+              icon={isDarkMode ? <SunOutlined /> : <MoonOutlined />}
+              onClick={toggleDarkMode}
+            />
             <Dropdown menu={userMenu} placement="bottomRight">
               <Button className="app-user-button" type="text">
                 <Avatar size="small" icon={<UserOutlined />} />
@@ -331,11 +365,24 @@ function App() {
                 </div>
               )}
             </div>
-            <div className="app-content-body fade-in-up">{renderContent()}</div>
+            <div className="app-content-body">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={selectedMenu}
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.25, ease: 'easeInOut' }}
+                >
+                  {renderContent()}
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </Content>
         </Layout>
       </Layout>
     </Layout>
+    </ConfigProvider>
   );
 }
 

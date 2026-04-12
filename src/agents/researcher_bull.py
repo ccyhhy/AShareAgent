@@ -1,10 +1,11 @@
-import ast
+﻿import ast
 import json
 
 from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -12,12 +13,6 @@ from src.agents.state import (
 from src.utils.api_utils import agent_endpoint
 
 
-def _ensure_agent_outputs(data: dict) -> dict:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 @agent_endpoint(
@@ -33,7 +28,7 @@ def researcher_bull_agent(state: AgentState):
         state,
         agent_key="researcher_bull",
         agent_type="llm",
-        message_name="researcher_bull_agent",
+        message_name="researcher_bull",
         output_key="researcher_bull",
         payload_overrides={
             "perspective": "bullish",
@@ -72,7 +67,7 @@ def researcher_bull_agent(state: AgentState):
     )
 
     default_signal = json.dumps(
-        {"signal": "neutral", "confidence": 0.5, "reasoning": "No data available"}
+        {"signal": "neutral", "confidence": 0.5, "reasoning": "暂无可用数据"}
     )
     if not technical_message:
         technical_message = HumanMessage(content=default_signal, name="technical_analyst_agent")
@@ -123,21 +118,21 @@ def researcher_bull_agent(state: AgentState):
     tech_signal = technical_signals.get("signal", "neutral")
     if tech_signal == "bullish":
         bullish_points.append(
-            f"Relative valuation looks attractive (PB percentile), confidence {tech_conf:.1%}."
+            f"相对估值（PB分位）处于偏低区间，具备吸引力，置信度 {tech_conf:.1%}。"
         )
         weighted_scores.append(tech_conf * weights["technical"])
         signal_strengths.append(tech_conf)
     elif tech_signal == "neutral":
-        bullish_points.append("Relative valuation is near fair value; room for selective accumulation.")
+        bullish_points.append("相对估值接近合理区间，可择机分批布局。")
         weighted_scores.append(0.60 * weights["technical"])
         signal_strengths.append(0.60)
     else:
         if tech_conf < 0.6:
-            bullish_points.append("Valuation pressure is moderate; potential mean-reversion opportunity remains.")
+            bullish_points.append("估值压力中等，仍存在均值回归后的配置机会。")
             weighted_scores.append(0.45 * weights["technical"])
             signal_strengths.append(0.45)
         else:
-            bullish_points.append("Valuation is expensive, but long-term quality names can still be tracked.")
+            bullish_points.append("估值偏高，但长期优质标的仍可持续跟踪。")
             weighted_scores.append(0.30 * weights["technical"])
             signal_strengths.append(0.30)
 
@@ -145,15 +140,15 @@ def researcher_bull_agent(state: AgentState):
     fund_conf = _parse_confidence(fundamental_signals.get("confidence", 0))
     fund_signal = fundamental_signals.get("signal", "neutral")
     if fund_signal == "bullish":
-        bullish_points.append(f"Fundamentals remain solid, confidence {fund_conf:.1%}.")
+        bullish_points.append(f"基本面整体稳健，置信度 {fund_conf:.1%}。")
         weighted_scores.append(fund_conf * weights["fundamental"])
         signal_strengths.append(fund_conf)
     elif fund_signal == "neutral":
-        bullish_points.append("Fundamentals are stable; upside depends on next earnings catalyst.")
+        bullish_points.append("基本面保持稳定，上行空间取决于下一阶段业绩催化。")
         weighted_scores.append(0.55 * weights["fundamental"])
         signal_strengths.append(0.55)
     else:
-        bullish_points.append("Fundamentals are weak, but improvement potential should be monitored.")
+        bullish_points.append("基本面偏弱，但仍需关注后续改善弹性。")
         weighted_scores.append((0.35 if fund_conf < 0.5 else 0.20) * weights["fundamental"])
         signal_strengths.append(0.35 if fund_conf < 0.5 else 0.20)
 
@@ -161,15 +156,15 @@ def researcher_bull_agent(state: AgentState):
     val_conf = _parse_confidence(valuation_signals.get("confidence", 0))
     val_signal = valuation_signals.get("signal", "neutral")
     if val_signal == "bullish":
-        bullish_points.append(f"DCF valuation indicates margin of safety, confidence {val_conf:.1%}.")
+        bullish_points.append(f"DCF估值显示存在安全边际，置信度 {val_conf:.1%}。")
         weighted_scores.append(val_conf * weights["valuation"])
         signal_strengths.append(val_conf)
     elif val_signal == "neutral":
-        bullish_points.append("Valuation is broadly fair and supports hold/add decisions.")
+        bullish_points.append("估值整体合理，支持持有或小幅加仓。")
         weighted_scores.append(0.50 * weights["valuation"])
         signal_strengths.append(0.50)
     else:
-        bullish_points.append("Valuation is stretched; position sizing should stay conservative.")
+        bullish_points.append("估值偏高，仓位管理应保持谨慎。")
         weighted_scores.append(0.35 * weights["valuation"])
         signal_strengths.append(0.35)
 
@@ -177,15 +172,15 @@ def researcher_bull_agent(state: AgentState):
     sent_conf = _parse_confidence(sentiment_signals.get("confidence", 0))
     sent_signal = sentiment_signals.get("signal", "neutral")
     if sent_signal == "bullish":
-        bullish_points.append(f"Market sentiment is supportive, confidence {sent_conf:.1%}.")
+        bullish_points.append(f"市场情绪偏正面，置信度 {sent_conf:.1%}。")
         weighted_scores.append(sent_conf * weights["sentiment"])
         signal_strengths.append(sent_conf)
     elif sent_signal == "neutral":
-        bullish_points.append("Market sentiment is balanced and does not block long allocation.")
+        bullish_points.append("市场情绪中性，不构成做多阻碍。")
         weighted_scores.append(0.55 * weights["sentiment"])
         signal_strengths.append(0.55)
     else:
-        bullish_points.append("Sentiment is cautious; contrarian entry opportunities may appear.")
+        bullish_points.append("市场情绪偏谨慎，可能带来逆向布局窗口。")
         weighted_scores.append(0.50 * weights["sentiment"])
         signal_strengths.append(0.50)
 
@@ -196,12 +191,12 @@ def researcher_bull_agent(state: AgentState):
 
     logic_parts = []
     if max(signal_strengths) > 0.7:
-        logic_parts.append("High-conviction signals exist across key dimensions")
+        logic_parts.append("关键维度存在高置信支持信号")
     if "policy" in str(fundamental_signals).lower():
-        logic_parts.append("policy direction may support the investment thesis")
+        logic_parts.append("政策方向可能对投资逻辑形成支撑")
     if min(signal_strengths) > 0.4:
-        logic_parts.append("signal mix is relatively balanced for A-share volatility")
-    investment_logic = "; ".join(logic_parts) if logic_parts else "composite signals still indicate potential upside"
+        logic_parts.append("在A股波动特征下，信号组合相对均衡")
+    investment_logic = "；".join(logic_parts) if logic_parts else "综合信号仍显示一定上行潜力"
 
     message_content = {
         "agent_type": "llm",
@@ -210,7 +205,7 @@ def researcher_bull_agent(state: AgentState):
         "thesis_points": bullish_points,
         "technical_signal_semantics": technical_semantics,
         "sentiment_signal_semantics": sentiment_semantics,
-        "reasoning": f"Bullish thesis under A-share context: {investment_logic}.",
+        "reasoning": f"A股语境下的多头观点：{investment_logic}。",
         "signal_weights": weights,
         "signal_consistency": signal_consistency,
         "ashare_factors": {
@@ -222,7 +217,7 @@ def researcher_bull_agent(state: AgentState):
 
     message = HumanMessage(
         content=json.dumps(message_content, ensure_ascii=False),
-        name="researcher_bull_agent",
+        name="researcher_bull",
     )
 
     if show_reasoning:
@@ -242,3 +237,4 @@ def researcher_bull_agent(state: AgentState):
         "data": updated_data,
         "metadata": result_metadata,
     }
+

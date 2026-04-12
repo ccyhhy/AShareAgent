@@ -1,6 +1,6 @@
 # A股投资Agent系统
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
 [![React](https://img.shields.io/badge/React-19.1+-61DAFB.svg)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8+-3178C6.svg)](https://www.typescriptlang.org/)
@@ -302,7 +302,7 @@ flowchart TD
 ## 技术栈
 
 ### 后端技术
-- **Python 3.9+** - 核心开发语言
+- **Python 3.10+** - 核心开发语言
 - **FastAPI** - 高性能Web框架
 - **LangGraph** - Agent工作流编排
 - **SQLite/PostgreSQL** - 数据存储
@@ -327,7 +327,7 @@ flowchart TD
 ## 快速开始
 
 ### 环境要求
-- Python 3.9+
+- Python 3.10+
 - Node.js 16+
 - Poetry (Python包管理器)
 

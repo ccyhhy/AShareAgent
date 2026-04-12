@@ -98,11 +98,31 @@ export interface AnalysisResultResponse {
   [key: string]: any;
 }
 
+export interface AnalysisStageAgent {
+  key: string;
+  label: string;
+  status: 'pending' | 'running' | 'completed' | 'error' | string;
+}
+
+export interface AnalysisStage {
+  key: string;
+  title: string;
+  description: string;
+  status: 'pending' | 'running' | 'completed' | 'error' | string;
+  agents: AnalysisStageAgent[];
+}
+
 export interface AnalysisStatus {
   run_id: string;
   status: 'running' | 'completed' | 'failed';
   progress?: string;
+  progress_percent?: number;
   ticker?: string;
+  current_stage?: AnalysisStage | null;
+  stages?: AnalysisStage[];
+  active_agents?: string[];
+  completed_stage_count?: number;
+  total_stage_count?: number;
   result?: AnalysisResult;
 }
 

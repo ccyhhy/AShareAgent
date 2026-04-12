@@ -143,6 +143,50 @@ def test_macro_analyst_agent_output_contract_always_exposes_core_fields(monkeypa
     assert output["reasoning"].strip()
 
 
+def test_macro_analyst_filters_news_relative_to_historical_end_date(monkeypatch):
+    monkeypatch.setattr(macro_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(macro_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+
+    captured = {}
+
+    monkeypatch.setattr(
+        macro_module,
+        "get_stock_news",
+        lambda symbol, max_news=100, date=None: [
+            {
+                "title": "Historical in-window macro news",
+                "content": "Within the historical analysis window.",
+                "publish_time": "2024-01-08 09:00:00",
+                "source": "unit_test",
+            },
+            {
+                "title": "Historical expired macro news",
+                "content": "Outside the historical analysis window.",
+                "publish_time": "2023-12-20 09:00:00",
+                "source": "unit_test",
+            },
+        ],
+    )
+    def fake_macro_analysis(news_list):
+        captured["titles"] = [item["title"] for item in news_list]
+        return {
+            "macro_environment": "neutral",
+            "impact_on_stock": "neutral",
+            "key_factors": [],
+            "reasoning": "filtered",
+        }
+
+    monkeypatch.setattr(macro_module, "get_macro_news_analysis", fake_macro_analysis)
+
+    state = _make_state()
+    state["data"]["end_date"] = "2024-01-10"
+    result = macro_module.macro_analyst_agent(state)
+    output = result["data"]["agent_outputs"]["macro_analyst"]
+
+    assert captured["titles"] == ["Historical in-window macro news"]
+    assert output["reasoning"]
+
+
 def test_get_macro_news_analysis_returns_cached_result_without_llm_call(monkeypatch):
     cached_result = {
         "macro_environment": "positive",

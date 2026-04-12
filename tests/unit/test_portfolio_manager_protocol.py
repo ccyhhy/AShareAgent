@@ -143,3 +143,94 @@ def test_portfolio_manager_falls_back_to_messages_without_agent_outputs(monkeypa
 
     decision = json.loads(result["messages"][0].content)
     assert decision["reasoning"] == "fallback-ok"
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_portfolio_manager_reasoning_uses_output_then_agent_name_in_backtest(monkeypatch):
+    reasoning_calls = []
+
+    monkeypatch.setenv("ASHAREAGENT_BACKTEST_MODE", "1")
+    monkeypatch.setattr(portfolio_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        portfolio_module,
+        "show_agent_reasoning",
+        lambda output, agent_name: reasoning_calls.append((output, agent_name)),
+    )
+    monkeypatch.setattr(portfolio_module, "log_llm_interaction", lambda _state: (lambda fn: fn))
+
+    portfolio_module.portfolio_management_agent(_build_state(with_agent_outputs=True))
+
+    assert reasoning_calls == [
+        (
+            "Backtest mode active. Skip remote LLM call and use deterministic conservative decision.",
+            "portfolio_management_agent",
+        )
+    ]
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_portfolio_manager_reasoning_uses_output_then_agent_name_on_llm_success(monkeypatch):
+    reasoning_calls = []
+
+    def fake_llm(_messages):
+        return json.dumps(
+            {
+                "action": "hold",
+                "quantity": 0,
+                "confidence": 0.66,
+                "agent_signals": [],
+                "reasoning": "ok",
+            }
+        )
+
+    state = _build_state(with_agent_outputs=True)
+    state["metadata"]["show_reasoning"] = True
+
+    monkeypatch.delenv("ASHAREAGENT_BACKTEST_MODE", raising=False)
+    monkeypatch.setattr(portfolio_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        portfolio_module,
+        "show_agent_reasoning",
+        lambda output, agent_name: reasoning_calls.append((output, agent_name)),
+    )
+    monkeypatch.setattr(portfolio_module, "log_llm_interaction", lambda _state: (lambda fn: fn))
+    monkeypatch.setattr(portfolio_module, "get_chat_completion", fake_llm)
+
+    portfolio_module.portfolio_management_agent(state)
+
+    assert reasoning_calls[0] == (
+        "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
+        "portfolio_management_agent",
+    )
+    assert reasoning_calls[1][1] == "portfolio_management_agent"
+    assert reasoning_calls[1][0].startswith("Final LLM decision JSON: ")
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_portfolio_manager_reasoning_uses_output_then_agent_name_on_llm_failure(monkeypatch):
+    reasoning_calls = []
+
+    state = _build_state(with_agent_outputs=True)
+
+    monkeypatch.delenv("ASHAREAGENT_BACKTEST_MODE", raising=False)
+    monkeypatch.setattr(portfolio_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        portfolio_module,
+        "show_agent_reasoning",
+        lambda output, agent_name: reasoning_calls.append((output, agent_name)),
+    )
+    monkeypatch.setattr(portfolio_module, "log_llm_interaction", lambda _state: (lambda fn: fn))
+    monkeypatch.setattr(portfolio_module, "get_chat_completion", lambda _messages: None)
+
+    portfolio_module.portfolio_management_agent(state)
+
+    assert reasoning_calls == [
+        (
+            "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
+            "portfolio_management_agent",
+        ),
+        (
+            "LLM call failed. Using default conservative decision.",
+            "portfolio_management_agent",
+        ),
+    ]

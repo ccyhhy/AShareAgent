@@ -1,10 +1,11 @@
-import ast
+﻿import ast
 import json
 
 from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -12,12 +13,6 @@ from src.agents.state import (
 from src.utils.api_utils import agent_endpoint
 
 
-def _ensure_agent_outputs(data: dict) -> dict:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
 @agent_endpoint(
@@ -74,7 +69,7 @@ def researcher_bear_agent(state: AgentState):
     )
 
     default_signal = json.dumps(
-        {"signal": "neutral", "confidence": 0.5, "reasoning": "No data available"}
+        {"signal": "neutral", "confidence": 0.5, "reasoning": "暂无可用数据"}
     )
     if not technical_message:
         technical_message = HumanMessage(content=default_signal, name="technical_analyst_agent")
@@ -125,64 +120,64 @@ def researcher_bear_agent(state: AgentState):
     tech_signal = technical_signals.get("signal", "neutral")
     if tech_signal == "bearish":
         bearish_points.append(
-            f"Relative valuation shows overvaluation risk (PB percentile), confidence {tech_conf:.1%}."
+            f"相对估值（PB分位）显示高估风险，置信度 {tech_conf:.1%}。"
         )
         weighted_scores.append(tech_conf * weights["technical"])
         risk_factors.append("valuation_position_risk")
         if tech_conf > 0.8:
             risk_factors.append("limit_down_risk")
     elif tech_signal == "bullish":
-        bearish_points.append("Strong valuation rebound may trigger pullback risk after sentiment overheating.")
+        bearish_points.append("估值修复过快后，若情绪过热可能触发回撤风险。")
         weighted_scores.append(0.60 * weights["technical"])
         risk_factors.append("pullback_risk")
     else:
-        bearish_points.append("Relative valuation is mixed; downside tail risk still needs monitoring.")
+        bearish_points.append("相对估值信号分化，下行尾部风险仍需跟踪。")
         weighted_scores.append(0.40 * weights["technical"])
 
     # Fundamentals
     fund_conf = _parse_confidence(fundamental_signals.get("confidence", 0))
     fund_signal = fundamental_signals.get("signal", "neutral")
     if fund_signal == "bearish":
-        bearish_points.append(f"Fundamentals deteriorate with confidence {fund_conf:.1%}.")
+        bearish_points.append(f"基本面走弱，置信度 {fund_conf:.1%}。")
         weighted_scores.append(fund_conf * weights["fundamental"])
         risk_factors.append("fundamental_risk")
         if "policy" in str(fundamental_signals).lower():
             risk_factors.append("policy_risk")
     elif fund_signal == "bullish":
-        bearish_points.append("Strong fundamentals are priced in; earnings-disappointment risk remains.")
+        bearish_points.append("较强基本面可能已被定价，仍需警惕业绩不及预期风险。")
         weighted_scores.append(0.45 * weights["fundamental"])
         risk_factors.append("expectation_risk")
     else:
-        bearish_points.append("Fundamentals are neutral; growth durability still uncertain.")
+        bearish_points.append("基本面中性，增长持续性仍有不确定性。")
         weighted_scores.append(0.35 * weights["fundamental"])
 
     # Valuation
     val_conf = _parse_confidence(valuation_signals.get("confidence", 0))
     val_signal = valuation_signals.get("signal", "neutral")
     if val_signal == "bearish":
-        bearish_points.append(f"DCF valuation indicates downside pressure, confidence {val_conf:.1%}.")
+        bearish_points.append(f"DCF估值显示下行压力，置信度 {val_conf:.1%}。")
         weighted_scores.append(val_conf * weights["valuation"])
         risk_factors.append("valuation_risk")
     elif val_signal == "bullish":
-        bearish_points.append("Valuation upside depends on perfect execution; repricing risk should be considered.")
+        bearish_points.append("估值上行依赖较强执行兑现，需考虑再定价风险。")
         weighted_scores.append(0.40 * weights["valuation"])
     else:
-        bearish_points.append("Valuation is fair, leaving limited buffer if macro shocks occur.")
+        bearish_points.append("估值大体合理，面对宏观冲击时缓冲有限。")
         weighted_scores.append(0.35 * weights["valuation"])
 
     # Market sentiment
     sent_conf = _parse_confidence(sentiment_signals.get("confidence", 0))
     sent_signal = sentiment_signals.get("signal", "neutral")
     if sent_signal == "bearish":
-        bearish_points.append(f"Market sentiment is weak, confidence {sent_conf:.1%}.")
+        bearish_points.append(f"市场情绪偏弱，置信度 {sent_conf:.1%}。")
         weighted_scores.append(sent_conf * weights["sentiment"])
         risk_factors.append("sentiment_risk")
     elif sent_signal == "bullish":
-        bearish_points.append("Sentiment overheating can become euphoria risk.")
+        bearish_points.append("情绪过热可能演化为乐观透支风险。")
         weighted_scores.append(0.70 * weights["sentiment"])
         risk_factors.append("euphoria_risk")
     else:
-        bearish_points.append("Neutral sentiment offers limited downside protection in volatility spikes.")
+        bearish_points.append("中性情绪在波动放大阶段的下行保护有限。")
         weighted_scores.append(0.30 * weights["sentiment"])
 
     weighted_confidence = sum(weighted_scores)
@@ -191,14 +186,14 @@ def researcher_bear_agent(state: AgentState):
 
     logic_parts = []
     if "limit_down_risk" in risk_factors:
-        logic_parts.append("technical drawdown risk may accelerate")
+        logic_parts.append("技术面回撤风险可能加速")
     if "policy_risk" in risk_factors:
-        logic_parts.append("policy uncertainty may pressure valuation")
+        logic_parts.append("政策不确定性可能压制估值")
     if "euphoria_risk" in risk_factors:
-        logic_parts.append("sentiment overheating increases reversal probability")
+        logic_parts.append("情绪过热提升反转概率")
     if len(set(risk_factors)) >= 3:
-        logic_parts.append("multiple risks are stacking")
-    risk_logic = "; ".join(logic_parts) if logic_parts else "downside risks are still non-trivial"
+        logic_parts.append("多重风险正在叠加")
+    risk_logic = "；".join(logic_parts) if logic_parts else "下行风险仍不可忽视"
 
     message_content = {
         "agent_type": "llm",
@@ -207,7 +202,7 @@ def researcher_bear_agent(state: AgentState):
         "thesis_points": bearish_points,
         "technical_signal_semantics": technical_semantics,
         "sentiment_signal_semantics": sentiment_semantics,
-        "reasoning": f"Bearish thesis under A-share context: {risk_logic}.",
+        "reasoning": f"A股语境下的空头观点：{risk_logic}。",
         "risk_weights": weights,
         "risk_factors": sorted(set(risk_factors)),
         "risk_concentration": risk_concentration,
@@ -241,3 +236,4 @@ def researcher_bear_agent(state: AgentState):
         "data": updated_data,
         "metadata": result_metadata,
     }
+

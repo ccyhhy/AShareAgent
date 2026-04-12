@@ -24,6 +24,20 @@ logger = setup_logger('api')
 warnings.filterwarnings('ignore')
 
 # 创建会话对象，支持连接池和重试策略
+
+# ---- 强制 akshare/requests 绕过系统网络代理 (VPN 分流) ----
+from requests.sessions import Session
+_original_request = Session.request
+
+def _bypass_proxy_request(self, method, url, **kwargs):
+    # 只针对国内源（东方财富、新浪、巨潮等）绕过代理，对外网（雅虎财经）放行代理
+    if not (url and "yahoo.com" in str(url)):
+        kwargs['proxies'] = {"http": None, "https": None}
+    return _original_request(self, method, url, **kwargs)
+
+Session.request = _bypass_proxy_request
+# -------------------------------------------------------------
+
 def create_session_with_retries():
     """创建带有重试策略的会话对象"""
     session = requests.Session()
@@ -151,11 +165,34 @@ def validate_data_quality(data: pd.DataFrame, required_columns: List[str] = None
 
 
 def get_stock_code_for_yfinance(symbol: str) -> str:
-    """将A股代码转换为yfinance格式"""
-    if symbol.startswith('00') or symbol.startswith('30'):
-        return f"{symbol}.SZ"  # 深交所
-    else:
-        return f"{symbol}.SS"  # 上交所
+    normalized = str(symbol or "").strip().upper()
+    if not normalized:
+        return normalized
+
+    if normalized.endswith(".SH"):
+        return f"{normalized[:-3]}.SS"
+    if normalized.endswith((".SZ", ".SS", ".HK")):
+        return normalized
+
+    if normalized.isdigit():
+        if len(normalized) == 6:
+            if normalized.startswith(("00", "30")):
+                return f"{normalized}.SZ"
+            if normalized.startswith(("60", "68", "90")):
+                return f"{normalized}.SS"
+        if len(normalized) == 5:
+            return f"{normalized}.HK"
+
+    return normalized
+
+
+def _is_a_share_symbol(symbol: str) -> bool:
+    normalized = str(symbol or "").strip().upper()
+    if normalized.endswith((".SZ", ".SS", ".SH")):
+        return True
+    if normalized.endswith(".HK"):
+        return False
+    return normalized.isdigit() and len(normalized) == 6 and normalized.startswith(("0", "3", "6", "8", "9"))
 
 
 def _get_local_csv_provider(csv_dir: Union[str, Path, None] = None) -> LocalCSVProvider:
@@ -333,7 +370,7 @@ def get_financial_metrics(symbol: str) -> List[Dict[str, Any]]:
     logger.info(f"Getting financial indicators for {symbol}...")
     
     # 尝试多个数据源，优先使用eastmoney
-    data_sources = ['eastmoney', 'akshare', 'yfinance']
+    data_sources = ['eastmoney', 'akshare', 'yfinance'] if _is_a_share_symbol(symbol) else ['yfinance']
     
     for source in data_sources:
         try:
@@ -359,7 +396,8 @@ def get_financial_metrics(symbol: str) -> List[Dict[str, Any]]:
                         valid_indicators += 1
                 
                 # 至少需要有3个关键指标有效
-                if valid_indicators >= 3:
+                min_required = 2 if source == 'eastmoney' else 3
+                if valid_indicators >= min_required:
                     logger.info(f"✓ Successfully fetched financial metrics from {source} ({valid_indicators}/{len(key_indicators)} key indicators valid)")
                     return result
                 else:
@@ -373,10 +411,23 @@ def get_financial_metrics(symbol: str) -> List[Dict[str, Any]]:
             continue
     
     logger.error("All data sources failed for financial metrics")
+    # --- Offline Fallback ---
+    try:
+        import os, json
+        cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', f'offline_financials_{symbol}.json')
+        if os.path.exists(cache_path):
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                c_data = json.load(f)
+                if symbol in c_data:
+                    logger.info(f"Using OFFLINE CACHE for financial metrics ({symbol})")
+                    return [c_data[symbol]['metrics']]
+    except Exception as fallback_e:
+        pass
+    # ------------------------
     return [_get_default_financial_metrics()]
 
 
-@retry_on_failure(max_retries=3, delay=2)
+@retry_on_failure(max_retries=1, delay=2)
 def _get_financial_metrics_akshare(symbol: str) -> List[Dict[str, Any]]:
     """使用akshare获取财务指标，带重试机制"""
     # 获取实时行情数据（用于市值和估值比率）
@@ -385,7 +436,8 @@ def _get_financial_metrics_akshare(symbol: str) -> List[Dict[str, Any]]:
     try:
         # 使用更稳定的方式获取实时数据，添加重试和超时
         realtime_data = None
-        for attempt in range(3):
+        max_attempts = 1
+        for attempt in range(max_attempts):
             try:
                 # 使用线程池添加超时控制
                 with ThreadPoolExecutor(max_workers=1) as executor:
@@ -398,14 +450,14 @@ def _get_financial_metrics_akshare(symbol: str) -> List[Dict[str, Any]]:
                         logger.warning(f"Attempt {attempt + 1}: Empty data from akshare")
                     except ConcurrentTimeoutError:
                         logger.warning(f"Attempt {attempt + 1}: akshare API timeout")
-                        if attempt < 2:
+                        if attempt < max_attempts - 1:
                             time.sleep(2)
                             continue
                         raise TimeoutError("akshare API timeout after all retries")
                 time.sleep(1)
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1}: Failed to get akshare data: {e}")
-                if attempt < 2:
+                if attempt < max_attempts - 1:
                     time.sleep(2)
                     continue
                 raise
@@ -1006,7 +1058,7 @@ def calculate_comprehensive_financial_metrics(symbol: str, financial_statements:
 def get_market_data(symbol: str) -> Dict[str, Any]:
     """获取市场数据，使用多数据源策略"""
     # 重新排序数据源优先级，akshare优先（因为在非交易时间仍能提供有效价格）
-    data_sources = ['akshare', 'eastmoney', 'yfinance']
+    data_sources = ['eastmoney', 'akshare', 'yfinance'] if _is_a_share_symbol(symbol) else ['yfinance']
     
     for source in data_sources:
         try:
@@ -1036,6 +1088,30 @@ def get_market_data(symbol: str) -> Dict[str, Any]:
             continue
     
     logger.error("All market data sources failed")
+    # --- Offline Fallback ---
+    try:
+        import os, json
+        cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', f'offline_financials_{symbol}.json')
+        if os.path.exists(cache_path):
+            with open(cache_path, 'r', encoding='utf-8') as f:
+                c_data = json.load(f)
+                if symbol in c_data:
+                    logger.info(f"Using OFFLINE CACHE for market data ({symbol})")
+                    info = c_data[symbol]['market_data']
+                    return {
+                        "market_cap": safe_float(info.get('marketCap')),
+                        "volume": safe_float(info.get('volume')),
+                        "average_volume": safe_float(info.get('averageVolume')),
+                        "current_price": safe_float(info.get('currentPrice', info.get('previousClose', 0))),
+                        "pe_ratio": safe_float(info.get('trailingPE')),
+                        "price_to_book": safe_float(info.get('priceToBook')),
+                        "price_to_sales": safe_float(info.get('priceToSalesTrailing12Months')),
+                        "fifty_two_week_high": safe_float(info.get('fiftyTwoWeekHigh')),
+                        "fifty_two_week_low": safe_float(info.get('fiftyTwoWeekLow'))
+                    }
+    except Exception as fallback_e:
+        pass
+    # ------------------------
     return {}
 
 
@@ -1095,6 +1171,10 @@ def _get_market_data_yfinance(symbol: str) -> Dict[str, Any]:
             "market_cap": safe_float(info.get('marketCap')),
             "volume": safe_float(info.get('volume')),
             "average_volume": safe_float(info.get('averageVolume')),
+            "current_price": safe_float(info.get('currentPrice', info.get('previousClose', 0))),
+            "pe_ratio": safe_float(info.get('trailingPE')),
+            "price_to_book": safe_float(info.get('priceToBook')),
+            "price_to_sales": safe_float(info.get('priceToSalesTrailing12Months')),
             "fifty_two_week_high": safe_float(info.get('fiftyTwoWeekHigh')),
             "fifty_two_week_low": safe_float(info.get('fiftyTwoWeekLow'))
         }

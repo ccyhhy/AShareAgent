@@ -45,9 +45,9 @@ else:
 api_key = os.getenv("GEMINI_API_KEY")
 model = os.getenv("GEMINI_MODEL")
 
-if not api_key:
-    logger.error(f"{ERROR_ICON} 未找到 GEMINI_API_KEY 环境变量")
-    raise ValueError("GEMINI_API_KEY not found in environment variables")
+if not api_key and not os.getenv("OPENAI_COMPATIBLE_API_KEY"):
+    logger.error(f"{ERROR_ICON} 未找到 GEMINI_API_KEY 或 OPENAI_COMPATIBLE_API_KEY 环境变量")
+    raise ValueError("No API KEY found in environment variables")
 if not model:
     model = "gemini-1.5-flash"
     logger.info(f"{WAIT_ICON} 使用默认模型: {model}")

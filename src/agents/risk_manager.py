@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import json
 from typing import Any
@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage
 
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -45,15 +46,9 @@ def _signal_from_risk(risk_score: float) -> str:
     return "neutral"
 
 
-def _ensure_agent_outputs(data: dict[str, Any]) -> dict[str, Any]:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
 
 
-@agent_endpoint("risk_management", "安全边际/风险评估分析师（统计模型）")
+@agent_endpoint("risk_management", "Risk management analyst (statistical model)")
 def risk_management_agent(state: AgentState):
     show_workflow_status("Risk Manager")
     show_reasoning = state["metadata"]["show_reasoning"]
@@ -106,7 +101,7 @@ def risk_management_agent(state: AgentState):
                 "value_at_risk_95": None,
                 "sharpe_ratio": None,
             },
-            "reasoning": "Insufficient price history for statistical risk estimation.",
+            "reasoning": "价格历史样本不足，无法稳定估计统计风险。",
         }
     else:
         close = prices_df["close"].astype(float)
@@ -168,8 +163,8 @@ def risk_management_agent(state: AgentState):
                 "sharpe_ratio": round(float(sharpe_ratio), 4),
             },
             "reasoning": (
-                f"risk_score={risk_score:.2f}, volatility={annualized_volatility:.2%}, "
-                f"max_drawdown={max_drawdown:.2%}, VaR95={value_at_risk_95:.2%}, Sharpe={sharpe_ratio:.2f}."
+                f"风险评分={risk_score:.2f}，年化波动率={annualized_volatility:.2%}，"
+                f"最大回撤={max_drawdown:.2%}，VaR95={value_at_risk_95:.2%}，夏普比率={sharpe_ratio:.2f}。"
             ),
         }
 
@@ -193,3 +188,4 @@ def risk_management_agent(state: AgentState):
         "data": updated_data,
         "metadata": state["metadata"],
     }
+

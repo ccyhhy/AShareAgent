@@ -1,8 +1,9 @@
-import os
+﻿import os
 
 from langchain_core.messages import HumanMessage
 from src.agents.state import (
     AgentState,
+    _ensure_agent_outputs,
     maybe_return_ablation_stub,
     show_agent_reasoning,
     show_workflow_status,
@@ -15,16 +16,25 @@ from datetime import datetime, timedelta
 from src.tools.openrouter_config import get_chat_completion
 from src.database.data_service import get_data_service
 
-# 设置日志记录
+# 璁剧疆鏃ュ織璁板綍
 logger = setup_logger('macro_analyst_agent')
 
 
-def _ensure_agent_outputs(data: dict) -> dict:
-    agent_outputs = data.get("agent_outputs")
-    if not isinstance(agent_outputs, dict):
-        agent_outputs = {}
-    data["agent_outputs"] = agent_outputs
-    return agent_outputs
+
+
+def _resolve_reference_datetime(end_date) -> datetime:
+    text = str(end_date or "").strip()
+    if text:
+        candidate = text[:19]
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                parsed = datetime.strptime(candidate, fmt)
+                if fmt == "%Y-%m-%d":
+                    return parsed.replace(hour=23, minute=59, second=59)
+                return parsed
+            except ValueError:
+                continue
+    return datetime.now()
 
 
 _VALID_MACRO_LABELS = {"positive", "neutral", "negative"}
@@ -87,7 +97,7 @@ def _normalize_macro_message(payload) -> dict:
 
     reasoning = source.get("reasoning")
     if not isinstance(reasoning, str) or not reasoning.strip():
-        reasoning = "Macro analysis fallback used due missing or invalid model output."
+        reasoning = "模型输出缺失或无效，已使用宏观分析回退结果。"
 
     derived_signal = {
         "positive": "bullish",
@@ -117,7 +127,7 @@ def _normalize_macro_message(payload) -> dict:
     return normalized
 
 
-@agent_endpoint("macro_analyst", "宏观分析师，分析宏观经济环境对目标股票的影响")
+@agent_endpoint("macro_analyst", "Macro analyst for stock-level macroeconomic impact")
 def macro_analyst_agent(state: AgentState):
     """Responsible for macro analysis"""
     show_workflow_status("Macro Analyst")
@@ -142,7 +152,7 @@ def macro_analyst_agent(state: AgentState):
         return ablation_result
 
     symbol = data["ticker"]
-    logger.info(f"正在进行宏观分析: {symbol}")
+    logger.info(f"姝ｅ湪杩涜瀹忚鍒嗘瀽: {symbol}")
 
     # --- Backtest-safe guard: skip all remote calls in backtest mode ---
     _backtest_mode = os.getenv("ASHAREAGENT_BACKTEST_MODE", "").strip().lower() in {
@@ -153,8 +163,8 @@ def macro_analyst_agent(state: AgentState):
         message_content = _normalize_macro_message({
             "macro_environment": "neutral",
             "impact_on_stock": "neutral",
-            "key_factors": ["回测模式：跳过远程新闻和LLM调用"],
-            "reasoning": "Backtest mode active. Remote news crawling and LLM calls skipped for reproducibility.",
+            "key_factors": ["回测模式：跳过远程新闻抓取与LLM调用"],
+            "reasoning": "当前为回测模式，已跳过远程新闻抓取与LLM调用以保证可复现性。",
             "signal": "neutral",
             "confidence": "50%",
         })
@@ -175,24 +185,25 @@ def macro_analyst_agent(state: AgentState):
             "metadata": state["metadata"],
         }
 
-    # 获取 end_date 并传递给 get_stock_news
-    end_date = data.get("end_date")  # 从 run_hedge_fund 传递来的 end_date
+    # 鑾峰彇 end_date 骞朵紶閫掔粰 get_stock_news
+    end_date = data.get("end_date")  # 浠?run_hedge_fund 浼犻€掓潵鐨?end_date
 
-    # 获取大量新闻数据（最多100条），传递正确的日期参数
+    # 鑾峰彇澶ч噺鏂伴椈鏁版嵁锛堟渶澶?00鏉★級锛屼紶閫掓纭殑鏃ユ湡鍙傛暟
     news_list = get_stock_news(symbol, max_news=100, date=end_date)
 
-    # 过滤七天前的新闻和失败的搜索结果
-    cutoff_date = datetime.now() - timedelta(days=7)
+    # 杩囨护涓冨ぉ鍓嶇殑鏂伴椈鍜屽け璐ョ殑鎼滅储缁撴灉
+    reference_datetime = _resolve_reference_datetime(end_date)
+    cutoff_date = reference_datetime - timedelta(days=7)
     recent_news = []
     for news in news_list:
-        # 过滤掉搜索失败的新闻
-        if news.get('title') == '搜索失败' or '搜索失败' in news.get('title', ''):
-            logger.warning(f"过滤掉搜索失败的新闻: {news.get('title', '')}")
+        # 杩囨护鎺夋悳绱㈠け璐ョ殑鏂伴椈
+        if news.get('title') == '鎼滅储澶辫触' or '鎼滅储澶辫触' in news.get('title', ''):
+            logger.warning(f"杩囨护鎺夋悳绱㈠け璐ョ殑鏂伴椈: {news.get('title', '')}")
             continue
             
-        # 过滤掉明显无效的新闻
+        # Filter out obviously invalid news items.
         if news.get('content') and '无法完成搜索，错误信息' in news.get('content', ''):
-            logger.warning(f"过滤掉无效新闻: {news.get('title', '')}")
+            logger.warning(f"Filtered invalid news item: {news.get('title', '')}")
             continue
             
         if 'publish_time' in news:
@@ -202,19 +213,19 @@ def macro_analyst_agent(state: AgentState):
                 if news_date > cutoff_date:
                     recent_news.append(news)
             except ValueError:
-                # 如果时间格式无法解析，默认包含这条新闻
+                # 濡傛灉鏃堕棿鏍煎紡鏃犳硶瑙ｆ瀽锛岄粯璁ゅ寘鍚繖鏉℃柊闂?
                 recent_news.append(news)
         else:
-            # 如果没有publish_time字段，默认包含这条新闻
+            # 濡傛灉娌℃湁publish_time瀛楁锛岄粯璁ゅ寘鍚繖鏉℃柊闂?
             recent_news.append(news)
 
-    logger.info(f"获取到 {len(recent_news)} 条七天内的新闻")
+    logger.info("Retrieved %s news items within the seven-day window", len(recent_news))
 
-    # 如果没有获取到新闻，尝试强制刷新获取新的新闻数据
+    # 濡傛灉娌℃湁鑾峰彇鍒版柊闂伙紝灏濊瘯寮哄埗鍒锋柊鑾峰彇鏂扮殑鏂伴椈鏁版嵁
     if not recent_news:
-        logger.warning(f"未获取到 {symbol} 的最近有效新闻，尝试强制刷新...")
+        logger.warning(f"鏈幏鍙栧埌 {symbol} 鐨勬渶杩戞湁鏁堟柊闂伙紝灏濊瘯寮哄埗鍒锋柊...")
         
-        # 尝试直接使用akshare获取新闻，跳过缓存
+        # 灏濊瘯鐩存帴浣跨敤akshare鑾峰彇鏂伴椈锛岃烦杩囩紦瀛?
         try:
             import akshare as ak
             fresh_news_df = ak.stock_news_em(symbol=symbol)
@@ -223,53 +234,62 @@ def macro_analyst_agent(state: AgentState):
                     fresh_news_list = []
                     for _, row in fresh_news_df.head(10).iterrows():
                         try:
-                            content = row.get("新闻内容", "") or row.get("新闻标题", "")
+                            content = row.get("鏂伴椈鍐呭", "") or row.get("鏂伴椈鏍囬", "")
                             if len(content.strip()) > 10:
                                 fresh_news_item = {
-                                    "title": row.get("新闻标题", "").strip(),
+                                    "title": row.get("鏂伴椈鏍囬", "").strip(),
                                     "content": content.strip(),
-                                    "publish_time": str(row.get("发布时间", "")),
-                                    "source": row.get("文章来源", "").strip(),
-                                    "url": row.get("新闻链接", "").strip(),
+                                    "publish_time": str(row.get("鍙戝竷鏃堕棿", "")),
+                                    "source": row.get("鏂囩珷鏉ユ簮", "").strip(),
+                                    "url": row.get("鏂伴椈閾炬帴", "").strip(),
                                     "keyword": symbol
                                 }
                                 fresh_news_list.append(fresh_news_item)
-                        except:
+                        except Exception:
                             continue
                     
                     if fresh_news_list:
-                        logger.info(f"通过akshare强制刷新获取到 {len(fresh_news_list)} 条新闻")
+                        logger.info(
+                            "Refreshed %s news items directly via akshare",
+                            len(fresh_news_list),
+                        )
                         recent_news = fresh_news_list
         except Exception as e:
-            logger.error(f"强制刷新新闻失败: {e}")
+            logger.error(f"寮哄埗鍒锋柊鏂伴椈澶辫触: {e}")
     
-    # 如果仍然没有获取到新闻，返回默认结果
+    # 濡傛灉浠嶇劧娌℃湁鑾峰彇鍒版柊闂伙紝杩斿洖榛樿缁撴灉
     if not recent_news:
-        logger.warning(f"最终未获取到 {symbol} 的最近新闻，无法进行宏观分析")
+        logger.warning(f"鏈€缁堟湭鑾峰彇鍒?{symbol} 鐨勬渶杩戞柊闂伙紝鏃犳硶杩涜瀹忚鍒嗘瀽")
         message_content = {
             "macro_environment": "neutral",
             "impact_on_stock": "neutral",
-            "key_factors": ["未获取到有效的新闻数据", "新闻搜索系统可能存在问题", "建议检查新闻数据源"],
-            "reasoning": "未获取到最近有效新闻，可能是新闻搜索失败或数据源问题。建议检查新闻爬虫和数据库状态。"
+            "key_factors": [
+                "未检索到有效新闻数据",
+                "新闻检索链路可能出现异常",
+                "请检查新闻数据源与缓存状态",
+            ],
+            "reasoning": (
+                "近期未获取到有效新闻，可能由新闻检索失败或上游数据源异常导致。"
+            ),
         }
     else:
-        # 获取宏观分析结果
+        # 鑾峰彇瀹忚鍒嗘瀽缁撴灉
         macro_analysis = get_macro_news_analysis(recent_news)
         message_content = macro_analysis
 
     message_content = _normalize_macro_message(message_content)
 
-    # 如果需要显示推理过程
+    # 濡傛灉闇€瑕佹樉绀烘帹鐞嗚繃绋?
     if show_reasoning:
         show_agent_reasoning(message_content, "Macro Analysis Agent")
     
-    # 始终保存推理信息到metadata供API使用
+    # 濮嬬粓淇濆瓨鎺ㄧ悊淇℃伅鍒癿etadata渚汚PI浣跨敤
     updated_data = dict(data)
     agent_outputs = _ensure_agent_outputs(updated_data)
     agent_outputs["macro_analyst"] = message_content
     state["metadata"]["agent_reasoning"] = message_content
 
-    # 创建消息
+    # 鍒涘缓娑堟伅
     message = HumanMessage(
         content=json.dumps(message_content, ensure_ascii=False),
         name="macro_analyst_agent",
@@ -290,148 +310,136 @@ def macro_analyst_agent(state: AgentState):
 
 
 def get_macro_news_analysis(news_list: list) -> dict:
-    """分析宏观经济新闻对股票的影响
+    """鍒嗘瀽瀹忚缁忔祹鏂伴椈瀵硅偂绁ㄧ殑褰卞搷
 
     Args:
-        news_list (list): 新闻列表
+        news_list (list): 鏂伴椈鍒楄〃
 
     Returns:
-        dict: 宏观分析结果，包含环境评估、对股票的影响、关键因素和详细推理
+        dict: 瀹忚鍒嗘瀽缁撴灉锛屽寘鍚幆澧冭瘎浼般€佸鑲＄エ鐨勫奖鍝嶃€佸叧閿洜绱犲拰璇︾粏鎺ㄧ悊
     """
     if not news_list:
         return {
             "macro_environment": "neutral",
             "impact_on_stock": "neutral",
             "key_factors": [],
-            "reasoning": "没有足够的新闻数据进行宏观分析"
+            "reasoning": "可用新闻样本不足，无法完成可靠的宏观分析。",
         }
 
-    # 获取数据服务
+    # 鑾峰彇鏁版嵁鏈嶅姟
     data_service = get_data_service()
     
-    # 生成新闻内容的唯一标识
+    # 鐢熸垚鏂伴椈鍐呭鐨勫敮涓€鏍囪瘑
     news_key = "|".join([
         f"{news['title']}|{news.get('publish_time', '')}"
-        for news in news_list[:20]  # 使用前20条新闻作为标识
+        for news in news_list[:20]  # 浣跨敤鍓?0鏉℃柊闂讳綔涓烘爣璇?
     ])
 
-    # 检查数据库缓存
+    # 妫€鏌ユ暟鎹簱缂撳瓨
     cached_analysis = data_service.get_macro_analysis_from_cache(news_key)
     if cached_analysis:
-        logger.info("使用数据库中的宏观分析结果")
+        logger.info("Using cached macro analysis from the database")
         return cached_analysis
 
-    # 准备系统消息
     system_message = {
         "role": "system",
-        "content": """你是一位专业的宏观经济分析师，专注于分析宏观经济环境对A股个股的影响。
-        请分析提供的新闻，从宏观角度评估当前经济环境，并分析这些宏观因素对目标股票的潜在影响。
-        
-        请关注以下宏观因素：
-        1. 货币政策：利率、准备金率、公开市场操作等
-        2. 财政政策：政府支出、税收政策、补贴等
-        3. 产业政策：行业规划、监管政策、环保要求等
-        4. 国际环境：全球经济形势、贸易关系、地缘政治等
-        5. 市场情绪：投资者信心、市场流动性、风险偏好等
-        
-        你的分析应该包括：
-        1. 宏观环境评估：积极(positive)、中性(neutral)或消极(negative)
-        2. 对目标股票的影响：利好(positive)、中性(neutral)或利空(negative)
-        3. 关键影响因素：列出3-5个最重要的宏观因素
-        4. 详细推理：解释为什么这些因素会影响目标股票
-        
-        请确保你的分析：
-        1. 基于事实和数据，而非猜测
-        2. 考虑行业特性和公司特点
-        3. 关注中长期影响，而非短期波动
-        4. 提供具体、可操作的见解"""
+        "content": """你是专注A股上市公司的宏观分析师。
+请基于给定新闻评估当前宏观环境及其对目标股票的潜在影响。
+
+分析需覆盖：
+1. 宏观环境判断：positive / neutral / negative
+2. 对目标股票影响：positive / neutral / negative
+3. 关键因素：列出3-5个最重要宏观因素
+4. reasoning：用中文说明这些因素为何重要
+
+要求内容客观、具体、可执行。""",
     }
 
-    # 准备新闻内容
-    news_content = "\n\n".join([
-        f"标题：{news['title']}\n"
-        f"来源：{news['source']}\n"
-        f"时间：{news['publish_time']}\n"
-        f"内容：{news['content']}"
-        # 使用前50条新闻进行分析，注意这里不是100，因为可能超过上下文限制，可根据自己的LLM来自行设置
-        for news in news_list[:50]
-    ])
+    news_content = "\n\n".join(
+        [
+            f"Title: {news['title']}\n"
+            f"Source: {news['source']}\n"
+            f"Time: {news['publish_time']}\n"
+            f"Content: {news['content']}"
+            for news in news_list[:50]
+        ]
+    )
 
     user_message = {
         "role": "user",
-        "content": f"请分析以下新闻，评估当前宏观经济环境及其对相关A股上市公司的影响：\n\n{news_content}\n\n请以JSON格式返回结果，包含以下字段：macro_environment（宏观环境：positive/neutral/negative）、impact_on_stock（对股票影响：positive/neutral/negative）、key_factors（关键因素数组）、reasoning（详细推理）。"
+        "content": (
+            "请分析以下新闻，并返回JSON字段："
+            "`macro_environment`、`impact_on_stock`、`key_factors`、`reasoning`。\n\n"
+            f"{news_content}"
+        ),
     }
 
     try:
-        # 获取LLM分析结果
-        logger.info("正在调用LLM进行宏观分析...")
+        logger.info("Calling LLM for macro analysis")
         result = get_chat_completion([system_message, user_message])
         if result is None:
-            logger.error("LLM分析失败，无法获取宏观分析结果")
+            logger.error("LLM analysis failed; no macro result returned")
             return {
                 "macro_environment": "neutral",
                 "impact_on_stock": "neutral",
                 "key_factors": [],
-                "reasoning": "LLM分析失败，无法获取宏观分析结果"
+                "reasoning": "LLM分析失败，未返回宏观分析结果。",
             }
 
-        # 解析JSON结果
         try:
-            # 尝试直接解析
             analysis_result = json.loads(result.strip())
-            logger.info("成功解析LLM返回的JSON结果")
+            logger.info("Parsed macro analysis JSON directly")
         except json.JSONDecodeError:
-            # 如果直接解析失败，尝试提取JSON部分
             import re
-            json_match = re.search(r'```json\s*(.*?)\s*```', result, re.DOTALL)
+
+            json_match = re.search(r"```json\s*(.*?)\s*```", result, re.DOTALL)
             if json_match:
                 try:
                     analysis_result = json.loads(json_match.group(1).strip())
-                    logger.info("成功从代码块中提取并解析JSON结果")
-                except:
-                    # 如果仍然失败，返回默认结果
-                    logger.error("无法解析代码块中的JSON结果")
+                    logger.info("Parsed macro analysis JSON from fenced code block")
+                except Exception:
+                    logger.error("Failed to parse JSON content from fenced code block")
                     return {
                         "macro_environment": "neutral",
                         "impact_on_stock": "neutral",
                         "key_factors": [],
-                        "reasoning": "无法解析LLM返回的JSON结果"
+                        "reasoning": "LLM返回内容解析失败，无法提取有效JSON。",
                     }
             else:
-                # 如果没有找到JSON，返回默认结果
-                logger.error("LLM未返回有效的JSON格式结果")
+                logger.error("LLM did not return valid JSON content")
                 return {
                     "macro_environment": "neutral",
                     "impact_on_stock": "neutral",
                     "key_factors": [],
-                    "reasoning": "LLM未返回有效的JSON格式结果"
+                    "reasoning": "LLM未返回合法JSON内容。",
                 }
 
-        # 缓存结果到数据库
         try:
-            current_date = datetime.now().strftime('%Y-%m-%d')
+            current_date = datetime.now().strftime("%Y-%m-%d")
             data_service.save_macro_analysis_to_cache(
                 analysis_key=news_key,
                 date=current_date,
-                analysis_type='news',
-                macro_environment=analysis_result.get('macro_environment'),
-                impact_on_stock=analysis_result.get('impact_on_stock'),
-                key_factors=analysis_result.get('key_factors', []),
-                reasoning=analysis_result.get('reasoning'),
+                analysis_type="news",
+                macro_environment=analysis_result.get("macro_environment"),
+                impact_on_stock=analysis_result.get("impact_on_stock"),
+                key_factors=analysis_result.get("key_factors", []),
+                reasoning=analysis_result.get("reasoning"),
                 content=json.dumps(analysis_result, ensure_ascii=False),
-                news_count=len(news_list)
+                news_count=len(news_list),
             )
-            logger.info("宏观分析结果已缓存到数据库")
+            logger.info("Cached macro analysis result to the database")
         except Exception as cache_error:
-            logger.warning(f"缓存宏观分析结果时出错: {cache_error}")
+            logger.warning("Failed to cache macro analysis result: %s", cache_error)
 
         return analysis_result
 
-    except Exception as e:
-        logger.error(f"宏观分析出错: {e}")
+    except Exception as exc:
+        logger.error("Macro analysis failed: %s", exc)
         return {
             "macro_environment": "neutral",
             "impact_on_stock": "neutral",
             "key_factors": [],
-            "reasoning": f"分析过程中出错: {str(e)}"
+            "reasoning": f"宏观分析失败：{exc}",
         }
+
+
