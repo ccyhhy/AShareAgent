@@ -94,6 +94,10 @@ def researcher_bull_agent(state: AgentState):
     signal_strengths = []
     technical_semantics = "relative_valuation_pb_percentile"
     sentiment_semantics = "market_news_sentiment"
+    data_section = state.get("data", {})
+    raw_critical_data_complete = data_section.get("critical_data_complete")
+    critical_data_complete = True if raw_critical_data_complete is None else bool(raw_critical_data_complete)
+    missing_critical_data = list(data_section.get("missing_critical_data", []))
 
     weights = {
         "fundamental": 0.35,
@@ -132,7 +136,7 @@ def researcher_bull_agent(state: AgentState):
             weighted_scores.append(0.45 * weights["technical"])
             signal_strengths.append(0.45)
         else:
-            bullish_points.append("估值偏高，但长期优质标的仍可持续跟踪。")
+            bullish_points.append("估值偏高，但长期优质标的仍可持续跟踪并等待配置机会。")
             weighted_scores.append(0.30 * weights["technical"])
             signal_strengths.append(0.30)
 
@@ -148,7 +152,7 @@ def researcher_bull_agent(state: AgentState):
         weighted_scores.append(0.55 * weights["fundamental"])
         signal_strengths.append(0.55)
     else:
-        bullish_points.append("基本面偏弱，但仍需关注后续改善弹性。")
+        bullish_points.append("基本面偏弱，但仍需关注后续改善弹性与修复机会。")
         weighted_scores.append((0.35 if fund_conf < 0.5 else 0.20) * weights["fundamental"])
         signal_strengths.append(0.35 if fund_conf < 0.5 else 0.20)
 
@@ -189,14 +193,22 @@ def researcher_bull_agent(state: AgentState):
     signal_consistency = max(0.6, 1 - spread * 0.3)
     avg_confidence = min(max(weighted_confidence * signal_consistency, 0.0), 0.95)
 
-    logic_parts = []
-    if max(signal_strengths) > 0.7:
-        logic_parts.append("关键维度存在高置信支持信号")
-    if "policy" in str(fundamental_signals).lower():
-        logic_parts.append("政策方向可能对投资逻辑形成支撑")
-    if min(signal_strengths) > 0.4:
-        logic_parts.append("在A股波动特征下，信号组合相对均衡")
-    investment_logic = "；".join(logic_parts) if logic_parts else "综合信号仍显示一定上行潜力"
+    if not critical_data_complete:
+        bullish_points = [
+            f"关键数据缺失（{', '.join(missing_critical_data) if missing_critical_data else 'financial_metrics'}），当前不形成可靠多头论证。"
+        ]
+        signal_consistency = min(signal_consistency, 0.5)
+        avg_confidence = min(avg_confidence, 0.25)
+        investment_logic = "关键数据缺失，关键财务/市场数据不足，多头结论主动降级"
+    else:
+        logic_parts = []
+        if max(signal_strengths) > 0.7:
+            logic_parts.append("关键维度存在高置信支持信号")
+        if "policy" in str(fundamental_signals).lower():
+            logic_parts.append("政策方向可能对投资逻辑形成支撑")
+        if min(signal_strengths) > 0.4:
+            logic_parts.append("在A股波动特征下，信号组合相对均衡")
+        investment_logic = "；".join(logic_parts) if logic_parts else "综合信号仍显示一定上行潜力"
 
     message_content = {
         "agent_type": "llm",
@@ -206,6 +218,10 @@ def researcher_bull_agent(state: AgentState):
         "technical_signal_semantics": technical_semantics,
         "sentiment_signal_semantics": sentiment_semantics,
         "reasoning": f"A股语境下的多头观点：{investment_logic}。",
+        "data_sufficiency": {
+            "critical_data_complete": critical_data_complete,
+            "missing_critical_data": missing_critical_data,
+        },
         "signal_weights": weights,
         "signal_consistency": signal_consistency,
         "ashare_factors": {

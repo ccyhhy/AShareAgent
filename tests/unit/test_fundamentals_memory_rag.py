@@ -108,6 +108,35 @@ def test_fundamentals_agent_survives_knowledge_base_failures(monkeypatch):
     assert result["metadata"]["agent_reasoning"] == result["data"]["agent_outputs"]["fundamentals"]
 
 
+def test_fundamentals_agent_marks_missing_metrics_as_not_actionable(monkeypatch):
+    monkeypatch.setattr(fundamentals_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(fundamentals_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+
+    class FakeKnowledgeBase:
+        def retrieve_fundamentals_refs(self, **kwargs):
+            return []
+
+        def save_fundamentals_memory(self, **kwargs):
+            return True
+
+    monkeypatch.setattr(fundamentals_module, "_get_knowledge_base", lambda: FakeKnowledgeBase())
+
+    state = _make_state()
+    state["data"]["financial_metrics"] = [{}]
+    state["data"]["critical_data_complete"] = False
+    state["data"]["missing_critical_data"] = ["financial_metrics"]
+
+    result = fundamentals_module.fundamentals_agent(state)
+    output = result["data"]["agent_outputs"]["fundamentals"]
+
+    assert output["signal"] == "neutral"
+    assert output["confidence"] == "25%"
+    assert output["data_sufficiency"]["sufficient"] is False
+    assert output["data_sufficiency"]["reason"] == "financial_metrics_missing"
+    assert output["reasoning"]["data_quality"]["critical_data_complete"] is False
+    assert output["reasoning"]["data_quality"]["missing_critical_data"] == ["financial_metrics"]
+
+
 def test_fundamentals_agent_reports_longitudinal_memory_delta(monkeypatch):
     monkeypatch.setattr(fundamentals_module, "show_workflow_status", lambda *args, **kwargs: None)
     monkeypatch.setattr(fundamentals_module, "show_agent_reasoning", lambda *args, **kwargs: None)

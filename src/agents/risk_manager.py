@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import numpy as np
@@ -19,6 +20,26 @@ from src.utils.api_utils import agent_endpoint
 from src.utils.logging_config import setup_logger
 
 logger = setup_logger("risk_management_agent")
+LOT_SIZE = 100
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(number) or math.isinf(number):
+        return default
+    return number
+
+
+def _max_buy_quantity_from_value(max_buy_value: float, current_price: float, lot_size: int = LOT_SIZE) -> int:
+    if current_price <= 0 or max_buy_value <= 0:
+        return 0
+    raw_quantity = int(max_buy_value // current_price)
+    if lot_size > 1:
+        return (raw_quantity // lot_size) * lot_size
+    return max(raw_quantity, 0)
 
 
 def _to_confidence(sample_size: int) -> str:
@@ -67,6 +88,11 @@ def risk_management_agent(state: AgentState):
             "margin_of_safety_score": 50.0,
             "max_position": 0.35,
             "max_position_size": 0.0,
+            "max_total_position_value": 0.0,
+            "remaining_position_value_capacity": 0.0,
+            "current_price": None,
+            "max_buy_quantity": 0,
+            "quantity_lot_size": LOT_SIZE,
             "trading_action": "hold",
             "risk_metrics": {
                 "annualized_volatility": None,
@@ -86,14 +112,33 @@ def risk_management_agent(state: AgentState):
     prices_df = prices_df.dropna(subset=["close"]).reset_index(drop=True)
 
     if prices_df.empty or len(prices_df) < 20:
+        cash_available = _safe_float(portfolio.get("cash", 0.0), 0.0)
+        latest_price = (
+            _safe_float(prices_df["close"].iloc[-1], 0.0)
+            if not prices_df.empty and "close" in prices_df.columns
+            else 0.0
+        )
+        current_stock_value = _safe_float(portfolio.get("stock", 0.0), 0.0) * latest_price
+        total_portfolio_value = cash_available + current_stock_value
+        max_position = 0.35
+        max_total_position_value = total_portfolio_value * max_position
+        remaining_position_value_capacity = max(max_total_position_value - current_stock_value, 0.0)
+        max_buy_value = min(cash_available, remaining_position_value_capacity)
+        max_buy_quantity = _max_buy_quantity_from_value(max_buy_value, latest_price, LOT_SIZE)
+
         message_content = {
             "agent_type": "statistical_model",
             "signal": "neutral",
             "confidence": "40%",
             "risk_score": 50.0,
             "margin_of_safety_score": 50.0,
-            "max_position": 0.35,
-            "max_position_size": 0.0,
+            "max_position": max_position,
+            "max_position_size": round(max_total_position_value, 2),
+            "max_total_position_value": round(max_total_position_value, 2),
+            "remaining_position_value_capacity": round(remaining_position_value_capacity, 2),
+            "current_price": round(latest_price, 4) if latest_price > 0 else None,
+            "max_buy_quantity": max_buy_quantity,
+            "quantity_lot_size": LOT_SIZE,
             "trading_action": "hold",
             "risk_metrics": {
                 "annualized_volatility": None,
@@ -133,10 +178,14 @@ def risk_management_agent(state: AgentState):
 
         latest_price = float(close.iloc[-1])
         current_stock_value = float(portfolio.get("stock", 0) * latest_price)
-        total_portfolio_value = float(portfolio.get("cash", 0) + current_stock_value)
+        cash_available = _safe_float(portfolio.get("cash", 0.0), 0.0)
+        total_portfolio_value = float(cash_available + current_stock_value)
 
         max_position = _position_cap_from_risk_score(risk_score)
-        max_position_size = total_portfolio_value * max_position
+        max_total_position_value = total_portfolio_value * max_position
+        remaining_position_value_capacity = max(max_total_position_value - current_stock_value, 0.0)
+        max_buy_value = min(cash_available, remaining_position_value_capacity)
+        max_buy_quantity = _max_buy_quantity_from_value(max_buy_value, latest_price, LOT_SIZE)
 
         if risk_score >= 80:
             trading_action = "reduce_aggressively"
@@ -154,7 +203,12 @@ def risk_management_agent(state: AgentState):
             "risk_score": round(risk_score, 2),
             "margin_of_safety_score": round(margin_of_safety_score, 2),
             "max_position": round(max_position, 2),
-            "max_position_size": round(max_position_size, 2),
+            "max_position_size": round(max_total_position_value, 2),
+            "max_total_position_value": round(max_total_position_value, 2),
+            "remaining_position_value_capacity": round(remaining_position_value_capacity, 2),
+            "current_price": round(latest_price, 4),
+            "max_buy_quantity": int(max_buy_quantity),
+            "quantity_lot_size": LOT_SIZE,
             "trading_action": trading_action,
             "risk_metrics": {
                 "annualized_volatility": round(annualized_volatility, 4),
@@ -164,7 +218,8 @@ def risk_management_agent(state: AgentState):
             },
             "reasoning": (
                 f"风险评分={risk_score:.2f}，年化波动率={annualized_volatility:.2%}，"
-                f"最大回撤={max_drawdown:.2%}，VaR95={value_at_risk_95:.2%}，夏普比率={sharpe_ratio:.2f}。"
+                f"最大回撤={max_drawdown:.2%}，VaR95={value_at_risk_95:.2%}，夏普比率={sharpe_ratio:.2f}；"
+                f"可买上限={max_buy_quantity}股。"
             ),
         }
 

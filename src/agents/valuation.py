@@ -108,8 +108,21 @@ def _signal_from_margin(margin_of_safety: float) -> str:
 def _confidence_from_margin(margin_of_safety: float) -> str:
     confidence = max(0.35, min(abs(margin_of_safety), 0.95))
     return f"{round(confidence * 100)}%"
+def _has_meaningful_line_items(line_items: list[dict[str, Any]]) -> bool:
+    if not isinstance(line_items, list) or not line_items:
+        return False
+    for row in line_items[:2]:
+        if not isinstance(row, dict):
+            continue
+        for key in ("revenue", "net_income", "free_cash_flow"):
+            value = _safe_number(row.get(key), 0.0)
+            if value != 0.0:
+                return True
+    return False
 
 
+def _has_meaningful_market_cap(market_cap: float) -> bool:
+    return market_cap > 0
 
 
 @agent_endpoint("valuation", "DCF估值分析师（定量模型）")
@@ -132,6 +145,8 @@ def valuation_agent(state: AgentState):
     financial_metrics = data.get("financial_metrics", [{}])
     line_items = data.get("financial_line_items", [{}, {}])
     market_cap = _safe_number(data.get("market_cap"), 0.0)
+    statements_available = _has_meaningful_line_items(line_items)
+    market_data_available = _has_meaningful_market_cap(market_cap)
 
     latest = line_items[0] if len(line_items) > 0 else {}
     previous = line_items[1] if len(line_items) > 1 else {}
@@ -175,7 +190,16 @@ def valuation_agent(state: AgentState):
             f"安全边际={margin_of_safety:.2%}（{margin_assessment}）。"
         )
         data_quality = "正常"
+        data_sufficiency = {
+            "sufficient": True,
+            "missing_components": [],
+        }
     else:
+        missing_components = []
+        if not statements_available:
+            missing_components.append("financial_statements")
+        if not market_data_available:
+            missing_components.append("market_data")
         margin_of_safety = None
         margin_assessment = "数据不足"
         signal = "neutral"
@@ -185,6 +209,11 @@ def valuation_agent(state: AgentState):
             "因此DCF结论降级为中性。"
         )
         data_quality = "数据不足"
+        data_sufficiency = {
+            "sufficient": False,
+            "missing_components": missing_components,
+            "critical_data_complete": bool(data.get("critical_data_complete", False)),
+        }
 
     message_content = {
         "agent_type": "quantitative_model",
@@ -195,6 +224,7 @@ def valuation_agent(state: AgentState):
         "margin_of_safety": round(margin_of_safety, 4) if margin_of_safety is not None else None,
         "margin_of_safety_assessment": margin_assessment,
         "data_quality": data_quality,
+        "data_sufficiency": data_sufficiency,
         "assumptions": {
             "stage1_years": 5,
             "stage1_growth_rate": round(stage1_growth_rate, 4),

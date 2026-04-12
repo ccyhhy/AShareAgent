@@ -201,7 +201,7 @@ class TestDebateRoomAgent:
     def test_llm_failure_fallback(self, mock_agent_state):
         """测试LLM失败时的回退机制"""
         state = mock_agent_state.copy()
-        
+
         bull_msg = HumanMessage(
             content=json.dumps({
                 "perspective": "bullish",
@@ -211,7 +211,7 @@ class TestDebateRoomAgent:
             }),
             name="researcher_bull_agent"
         )
-        
+
         bear_msg = HumanMessage(
             content=json.dumps({
                 "perspective": "bearish",
@@ -221,25 +221,64 @@ class TestDebateRoomAgent:
             }),
             name="researcher_bear_agent"
         )
-        
+
         state["messages"] = [bull_msg, bear_msg]
-        
+
         with patch('src.agents.debate_room.get_chat_completion') as mock_llm:
             # 模拟LLM调用失败
             mock_llm.side_effect = Exception("API调用失败")
-            
+
             result = debate_room_agent(state)
-        
+
         # 即使LLM失败，也应该能产生合理的决策
         assert "messages" in result
         content = json.loads(result["messages"][-1].content)
-        
+
         assert "signal" in content
         assert content["signal"] in ["bullish", "bearish", "neutral"]
         # 基于原始置信度差异的决策
         assert content["bull_confidence"] == 0.7
         assert content["bear_confidence"] == 0.6
-    
+
+    def test_missing_critical_data_blocks_bullish_debate_output(self, mock_agent_state):
+        state = mock_agent_state.copy()
+        state["data"]["critical_data_complete"] = False
+        state["data"]["missing_critical_data"] = ["financial_metrics", "market_data"]
+
+        bull_msg = HumanMessage(
+            content=json.dumps({
+                "perspective": "bullish",
+                "confidence": 0.8,
+                "thesis_points": ["看多逻辑"],
+                "reasoning": "综合分析显示看多机会"
+            }),
+            name="researcher_bull_agent"
+        )
+        bear_msg = HumanMessage(
+            content=json.dumps({
+                "perspective": "bearish",
+                "confidence": 0.2,
+                "thesis_points": ["少量风险"],
+                "reasoning": "风险较小"
+            }),
+            name="researcher_bear_agent"
+        )
+
+        state["messages"] = [bull_msg, bear_msg]
+
+        with patch('src.agents.debate_room.get_chat_completion') as mock_llm:
+            mock_llm.return_value = json.dumps({
+                "analysis": "多头占优",
+                "score": 0.7,
+                "reasoning": "偏多"
+            })
+            result = debate_room_agent(state)
+
+        content = json.loads(result["messages"][-1].content)
+        assert content["signal"] == "neutral"
+        assert content["data_sufficiency"]["critical_data_complete"] is False
+        assert "关键数据缺失" in content["reasoning"]
+
     @patch('src.agents.debate_room.get_chat_completion')
     def test_adaptive_threshold_adjustment(self, mock_llm, mock_agent_state):
         """测试自适应阈值调整"""

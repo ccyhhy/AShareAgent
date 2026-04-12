@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as ConcurrentTimeoutError
 from typing import Any
@@ -94,6 +95,102 @@ def _default_decision() -> dict[str, Any]:
         ],
         "reasoning": "LLM接口异常，按风控优先原则回退为保守持有。",
     }
+def _coerce_non_negative_int(value: Any) -> int:
+    try:
+        return max(0, int(float(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if math.isnan(number) or math.isinf(number):
+        return default
+    return number
+
+
+def _apply_missing_data_guard(decision_json: dict[str, Any], *, critical_data_complete: bool, missing_critical_data: list[str]) -> dict[str, Any]:
+    if critical_data_complete:
+        return decision_json
+    action_text = str(decision_json.get("action", "")).strip().lower()
+    if action_text != "buy":
+        return decision_json
+    updated = dict(decision_json)
+    updated["action"] = "hold"
+    updated["quantity"] = 0
+    updated["signal"] = "neutral"
+    original_reasoning = str(updated.get("reasoning", "")).strip()
+    guard_reason = (
+        "关键数据缺失，最终决策禁止买入。"
+        f"缺失项：{', '.join(missing_critical_data) if missing_critical_data else 'unknown'}。"
+    )
+    updated["reasoning"] = f"{original_reasoning} {guard_reason}".strip()
+    return updated
+
+
+def _apply_buy_quantity_caps(
+    decision_json: dict[str, Any],
+    *,
+    risk_payload: dict[str, Any] | None,
+    portfolio: dict[str, Any],
+) -> dict[str, Any]:
+    updated = dict(decision_json)
+    action_text = str(updated.get("action", "")).strip().lower()
+    requested_quantity = _coerce_non_negative_int(updated.get("quantity", 0))
+    updated["quantity"] = requested_quantity
+
+    if action_text != "buy":
+        return updated
+
+    risk_data = risk_payload if isinstance(risk_payload, dict) else {}
+    lot_size = _coerce_non_negative_int(risk_data.get("quantity_lot_size", 100))
+    if lot_size <= 0:
+        lot_size = 100
+
+    current_price = _safe_float(risk_data.get("current_price"), 0.0)
+    cash_available = _safe_float(portfolio.get("cash", 0.0), 0.0)
+
+    risk_cap_quantity = requested_quantity
+    if "max_buy_quantity" in risk_data:
+        risk_cap_quantity = _coerce_non_negative_int(risk_data.get("max_buy_quantity", 0))
+
+    cash_cap_quantity = requested_quantity
+    if current_price > 0:
+        cash_cap_quantity = int(cash_available // current_price)
+
+    capped_quantity = min(requested_quantity, risk_cap_quantity, cash_cap_quantity)
+    if lot_size > 1:
+        capped_quantity = (capped_quantity // lot_size) * lot_size
+
+    updated["quantity_constraints"] = {
+        "requested_quantity": requested_quantity,
+        "risk_cap_quantity": risk_cap_quantity,
+        "cash_cap_quantity": cash_cap_quantity,
+        "lot_size": lot_size,
+        "current_price": current_price if current_price > 0 else None,
+    }
+
+    if capped_quantity < requested_quantity:
+        original_reasoning = str(updated.get("reasoning", "")).strip()
+        cap_reason = (
+            f"数量约束生效：请求{requested_quantity}股，"
+            f"风控上限{risk_cap_quantity}股，现金上限{cash_cap_quantity}股，"
+            f"整手后执行{capped_quantity}股。"
+        )
+        updated["reasoning"] = f"{original_reasoning} {cap_reason}".strip()
+
+    updated["quantity"] = capped_quantity
+    if capped_quantity <= 0:
+        updated["action"] = "hold"
+        updated["signal"] = "neutral"
+        original_reasoning = str(updated.get("reasoning", "")).strip()
+        hold_reason = "按风控/资金与整手约束，当前无法形成有效买入股数，已回退为持有。"
+        updated["reasoning"] = f"{original_reasoning} {hold_reason}".strip()
+
+    return updated
 
 
 @agent_endpoint(
@@ -106,6 +203,8 @@ def portfolio_management_agent(state: AgentState):
     show_workflow_status(f"{agent_name}: executing")
     show_reasoning_flag = state["metadata"]["show_reasoning"]
     portfolio = state["data"].get("portfolio", {"cash": 0.0, "stock": 0})
+    critical_data_complete = bool(state["data"].get("critical_data_complete", False))
+    missing_critical_data = list(state["data"].get("missing_critical_data", []))
 
     ablation_reason = get_ablation_disable_reason(
         state,
@@ -230,6 +329,9 @@ def portfolio_management_agent(state: AgentState):
 - `relative_valuation_analysis` 是PB分位估值信号的首选名称。
 - `technical_analysis` 仅作为兼容别名。
 - `sentiment_analysis` 指基于近期新闻的市场情绪。
+- `quantity` 表示最终交易股数，必须按100股整手。
+- 若关键数据缺失，不得输出 buy。
+- buy 数量不得超过风险管理给出的 `max_buy_quantity` 与现金可买上限。
 
 必填JSON字段：
 - action: buy | sell | hold
@@ -255,6 +357,10 @@ def portfolio_management_agent(state: AgentState):
 组合状态：
 - 现金：{portfolio.get('cash', 0.0):.2f}
 - 持仓股数：{portfolio.get('stock', 0)}
+
+关键数据完整性：
+- critical_data_complete: {critical_data_complete}
+- missing_critical_data: {missing_critical_data}
 """
 
     llm_interaction_messages = [
@@ -328,6 +434,17 @@ def portfolio_management_agent(state: AgentState):
                 )
 
     decision_json.setdefault("agent_type", "llm")
+    decision_json["quantity"] = _coerce_non_negative_int(decision_json.get("quantity", 0))
+    decision_json = _apply_missing_data_guard(
+        decision_json,
+        critical_data_complete=critical_data_complete,
+        missing_critical_data=missing_critical_data,
+    )
+    decision_json = _apply_buy_quantity_caps(
+        decision_json,
+        risk_payload=risk_payload,
+        portfolio=portfolio,
+    )
     if not decision_json.get("signal"):
         action_text = str(decision_json.get("action", "")).strip().lower()
         if action_text == "buy":
@@ -336,6 +453,10 @@ def portfolio_management_agent(state: AgentState):
             decision_json["signal"] = "bearish"
         else:
             decision_json["signal"] = "neutral"
+    decision_json["data_sufficiency"] = {
+        "critical_data_complete": critical_data_complete,
+        "missing_critical_data": missing_critical_data,
+    }
 
     llm_response_content = json.dumps(decision_json, ensure_ascii=False)
 

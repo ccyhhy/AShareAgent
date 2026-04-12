@@ -111,6 +111,30 @@ def test_valuation_agent_writes_quantitative_model_output():
 
 
 @pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_valuation_agent_marks_data_insufficiency_when_statements_or_market_cap_missing():
+    state = _make_state(
+        {
+            "financial_line_items": [{}, {}],
+            "financial_metrics": [{"earnings_growth": 0.15, "revenue_growth": 0.10}],
+            "market_cap": 0.0,
+            "critical_data_complete": False,
+            "missing_critical_data": ["financial_statements", "market_data"],
+        }
+    )
+
+    result = valuation_agent(state)
+    agent_output = result["data"]["agent_outputs"]["valuation"]
+
+    assert agent_output["signal"] == "neutral"
+    assert agent_output["data_quality"] == "数据不足"
+    assert agent_output["data_sufficiency"]["sufficient"] is False
+    assert agent_output["data_sufficiency"]["missing_components"] == [
+        "financial_statements",
+        "market_data",
+    ]
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
 def test_risk_manager_writes_statistical_model_output():
     prices = []
     for idx, close in enumerate(
@@ -176,4 +200,9 @@ def test_risk_manager_writes_statistical_model_output():
     assert "margin_of_safety_score" in agent_output
     assert "max_position" in agent_output
     assert "max_position_size" in agent_output
+    assert "max_total_position_value" in agent_output
+    assert "remaining_position_value_capacity" in agent_output
+    assert "current_price" in agent_output
+    assert "max_buy_quantity" in agent_output
+    assert "quantity_lot_size" in agent_output
     assert result["data"]["risk_analysis"] == agent_output

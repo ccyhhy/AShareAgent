@@ -238,6 +238,8 @@ def debate_room_agent(state: AgentState):
         "liquidity_concern": ashare_adjustments["liquidity_factor"] < 0,
         "direction_conflict": direction_conflict,
     }
+    critical_data_complete = bool(state.get("data", {}).get("critical_data_complete", False))
+    missing_critical_data = list(state.get("data", {}).get("missing_critical_data", []))
 
     if abs(mixed_confidence_diff) < adaptive_threshold:
         final_signal = "neutral"
@@ -258,6 +260,14 @@ def debate_room_agent(state: AgentState):
         final_signal = "bearish"
         confidence = bear_confidence
         reasoning = f"辩论后结论偏空。综合得分={mixed_confidence_diff:.3f}"
+
+    if not critical_data_complete and final_signal == "bullish":
+        final_signal = "neutral"
+        confidence = min(confidence, 0.35)
+        reasoning = (
+            "关键数据缺失，禁止输出偏多结论。"
+            f"缺失项：{', '.join(missing_critical_data) if missing_critical_data else 'unknown'}。"
+        )
 
     if special_conditions["policy_sensitive"]:
         reasoning += " | 政策敏感"
@@ -306,6 +316,10 @@ def debate_room_agent(state: AgentState):
             "consensus_strength": max(0.0, min(1.0, 1 - market_volatility)),
             "argument_balance": (min_conf / max_conf) if max_conf > 0 else 0,
             "llm_agreement": llm_alignment,
+        },
+        "data_sufficiency": {
+            "critical_data_complete": critical_data_complete,
+            "missing_critical_data": missing_critical_data,
         },
     }
 

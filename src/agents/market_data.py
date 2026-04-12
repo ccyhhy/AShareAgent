@@ -94,6 +94,12 @@ def market_data_agent(state: AgentState):
                 "financial_statements": False,
                 "market_data": False,
             },
+            "critical_data_complete": False,
+            "missing_critical_data": [
+                "financial_metrics",
+                "financial_statements",
+                "market_data",
+            ],
             "summary": "Ablation 已禁用 market_data 节点，使用确定性空载荷。",
         },
     )
@@ -231,6 +237,8 @@ def market_data_agent(state: AgentState):
         2,
     )
 
+    critical_data_complete = metrics_ok and statements_ok and market_ok
+
     market_data_summary = {
         "agent_type": "data_layer",
         "signal": "neutral",
@@ -244,6 +252,12 @@ def market_data_agent(state: AgentState):
             "financial_statements": statements_ok,
             "market_data": market_ok,
         },
+        "critical_data_complete": critical_data_complete,
+        "missing_critical_data": [
+            component
+            for component in missing_components
+            if component in {"financial_metrics", "financial_statements", "market_data"}
+        ],
         "data_quality": {
             "missing_components": missing_components,
             "missing_components_readable": missing_components_cn,
@@ -271,6 +285,8 @@ def market_data_agent(state: AgentState):
         "financial_line_items": financial_line_items,
         "market_cap": market_data.get("market_cap", 0),
         "market_data": market_data,
+        "critical_data_complete": critical_data_complete,
+        "missing_critical_data": market_data_summary["missing_critical_data"],
     }
     agent_outputs = _ensure_agent_outputs(updated_data)
     agent_outputs["market_data"] = market_data_summary

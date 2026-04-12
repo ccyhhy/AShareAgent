@@ -59,6 +59,8 @@ def _build_state(*, with_agent_outputs: bool) -> dict:
         "data": {
             "portfolio": {"cash": 10000.0, "stock": 200},
             "macro_news_analysis_result": "MARKET_MACRO_SUMMARY",
+            "critical_data_complete": True,
+            "missing_critical_data": [],
         },
         "metadata": {"show_reasoning": False},
     }
@@ -69,7 +71,13 @@ def _build_state(*, with_agent_outputs: bool) -> dict:
             "fundamentals": {"marker": "AGENT_OUTPUT_FUND", "signal": "bullish"},
             "sentiment": {"marker": "AGENT_OUTPUT_SENT", "signal": "bullish"},
             "valuation": {"marker": "AGENT_OUTPUT_VAL", "signal": "bullish"},
-            "risk_manager": {"marker": "AGENT_OUTPUT_RISK", "signal": "neutral"},
+            "risk_manager": {
+                "marker": "AGENT_OUTPUT_RISK",
+                "signal": "neutral",
+                "current_price": 50.0,
+                "max_buy_quantity": 300,
+                "quantity_lot_size": 100,
+            },
             "macro_analyst": {"marker": "AGENT_OUTPUT_MACRO", "signal": "neutral"},
         }
 
@@ -162,7 +170,7 @@ def test_portfolio_manager_reasoning_uses_output_then_agent_name_in_backtest(mon
 
     assert reasoning_calls == [
         (
-            "Backtest mode active. Skip remote LLM call and use deterministic conservative decision.",
+            "当前为回测模式，跳过远程LLM调用并使用确定性保守决策。",
             "portfolio_management_agent",
         )
     ]
@@ -199,7 +207,7 @@ def test_portfolio_manager_reasoning_uses_output_then_agent_name_on_llm_success(
     portfolio_module.portfolio_management_agent(state)
 
     assert reasoning_calls[0] == (
-        "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
+        "正在汇总相对估值、基本面、情绪、估值、风控、宏观与多空研究观点，准备调用LLM。",
         "portfolio_management_agent",
     )
     assert reasoning_calls[1][1] == "portfolio_management_agent"
@@ -226,11 +234,116 @@ def test_portfolio_manager_reasoning_uses_output_then_agent_name_on_llm_failure(
 
     assert reasoning_calls == [
         (
-            "Preparing LLM with RV(PB), fundamentals, market sentiment, valuation, risk, macro, and researcher views.",
+            "正在汇总相对估值、基本面、情绪、估值、风控、宏观与多空研究观点，准备调用LLM。",
             "portfolio_management_agent",
         ),
         (
-            "LLM call failed. Using default conservative decision.",
+            "LLM调用失败，回退为默认保守决策。",
             "portfolio_management_agent",
         ),
     ]
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_portfolio_manager_blocks_buy_when_critical_data_missing(monkeypatch):
+    def fake_llm(_messages):
+        return json.dumps(
+            {
+                "action": "buy",
+                "quantity": 123,
+                "confidence": 0.8,
+                "agent_signals": [],
+                "reasoning": "llm wanted buy",
+            }
+        )
+
+    state = _build_state(with_agent_outputs=True)
+    state["data"]["critical_data_complete"] = False
+    state["data"]["missing_critical_data"] = ["financial_metrics", "market_data"]
+
+    monkeypatch.setattr(portfolio_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(portfolio_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(portfolio_module, "log_llm_interaction", lambda _state: (lambda fn: fn))
+    monkeypatch.setattr(portfolio_module, "get_chat_completion", fake_llm)
+
+    result = portfolio_module.portfolio_management_agent(state)
+    decision = json.loads(result["messages"][0].content)
+
+    assert decision["action"] == "hold"
+    assert decision["quantity"] == 0
+    assert decision["signal"] == "neutral"
+    assert decision["data_sufficiency"]["critical_data_complete"] is False
+    assert "关键数据缺失" in decision["reasoning"]
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_portfolio_manager_caps_buy_quantity_by_risk_and_cash_and_lot(monkeypatch):
+    def fake_llm(_messages):
+        return json.dumps(
+            {
+                "action": "buy",
+                "quantity": 65000,
+                "confidence": 0.7,
+                "agent_signals": [],
+                "reasoning": "llm wanted large buy",
+            }
+        )
+
+    state = _build_state(with_agent_outputs=True)
+    state["data"]["critical_data_complete"] = True
+    state["data"]["missing_critical_data"] = []
+    state["data"]["portfolio"] = {"cash": 10000.0, "stock": 0}
+    state["data"]["agent_outputs"]["risk_manager"]["current_price"] = 50.0
+    state["data"]["agent_outputs"]["risk_manager"]["max_buy_quantity"] = 300
+    state["data"]["agent_outputs"]["risk_manager"]["quantity_lot_size"] = 100
+
+    monkeypatch.setattr(portfolio_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(portfolio_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(portfolio_module, "log_llm_interaction", lambda _state: (lambda fn: fn))
+    monkeypatch.setattr(portfolio_module, "get_chat_completion", fake_llm)
+
+    result = portfolio_module.portfolio_management_agent(state)
+    decision = json.loads(result["messages"][0].content)
+
+    # cash cap: 10000/50=200; risk cap=300; lot=100 => final 200
+    assert decision["action"] == "buy"
+    assert decision["quantity"] == 200
+    assert decision["quantity_constraints"]["risk_cap_quantity"] == 300
+    assert decision["quantity_constraints"]["cash_cap_quantity"] == 200
+    assert decision["quantity_constraints"]["lot_size"] == 100
+    assert "数量约束生效" in decision["reasoning"]
+
+
+@pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
+def test_portfolio_manager_turns_buy_to_hold_when_caps_result_zero_quantity(monkeypatch):
+    def fake_llm(_messages):
+        return json.dumps(
+            {
+                "action": "buy",
+                "quantity": 500,
+                "confidence": 0.7,
+                "agent_signals": [],
+                "reasoning": "llm wanted buy",
+            }
+        )
+
+    state = _build_state(with_agent_outputs=True)
+    state["data"]["critical_data_complete"] = True
+    state["data"]["missing_critical_data"] = []
+    state["data"]["portfolio"] = {"cash": 1000.0, "stock": 0}
+    state["data"]["agent_outputs"]["risk_manager"]["current_price"] = 1500.0
+    state["data"]["agent_outputs"]["risk_manager"]["max_buy_quantity"] = 100
+    state["data"]["agent_outputs"]["risk_manager"]["quantity_lot_size"] = 100
+
+    monkeypatch.setattr(portfolio_module, "show_workflow_status", lambda *args, **kwargs: None)
+    monkeypatch.setattr(portfolio_module, "show_agent_reasoning", lambda *args, **kwargs: None)
+    monkeypatch.setattr(portfolio_module, "log_llm_interaction", lambda _state: (lambda fn: fn))
+    monkeypatch.setattr(portfolio_module, "get_chat_completion", fake_llm)
+
+    result = portfolio_module.portfolio_management_agent(state)
+    decision = json.loads(result["messages"][0].content)
+
+    assert decision["action"] == "hold"
+    assert decision["signal"] == "neutral"
+    assert decision["quantity"] == 0
+    assert "无法形成有效买入股数" in decision["reasoning"]

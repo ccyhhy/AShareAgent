@@ -109,11 +109,11 @@ class TestResearcherBullAgent:
     def test_ashare_specific_features(self, mock_agent_state):
         """测试A股特色功能"""
         state = mock_agent_state.copy()
-        
+
         # 创建包含A股特色的信号
         fundamental_msg = HumanMessage(
             content=json.dumps({
-                "signal": "bullish", 
+                "signal": "bullish",
                 "confidence": 0.8,
                 "reasoning": {"policy_support": True}
             }),
@@ -131,23 +131,55 @@ class TestResearcherBullAgent:
             content=json.dumps({"signal": "bullish", "confidence": 0.6}),
             name="valuation_agent"
         )
-        
+
         state["messages"] = [technical_msg, fundamental_msg, sentiment_msg, valuation_msg]
-        
+
         result = researcher_bull_agent(state)
         new_message = result["messages"][0]
         content = json.loads(new_message.content)
-        
+
         # 检查A股特色因素
         assert "ashare_factors" in content
         assert "policy_sensitivity" in content["ashare_factors"]
         assert "signal_weights" in content
-        
+
         # 验证A股权重配置
         weights = content["signal_weights"]
         assert weights["fundamental"] == 0.35  # A股基本面权重更高
         assert weights["technical"] == 0.25    # 适应T+1
-        
+
+    def test_missing_critical_data_caps_bull_researcher_confidence(self, mock_agent_state):
+        state = mock_agent_state.copy()
+        state["data"]["critical_data_complete"] = False
+        state["data"]["missing_critical_data"] = ["financial_metrics", "market_data"]
+
+        technical_msg = HumanMessage(
+            content=json.dumps({"signal": "bullish", "confidence": 0.9}),
+            name="technical_analyst_agent"
+        )
+        fundamental_msg = HumanMessage(
+            content=json.dumps({"signal": "bullish", "confidence": 0.8}),
+            name="fundamentals_agent"
+        )
+        sentiment_msg = HumanMessage(
+            content=json.dumps({"signal": "bullish", "confidence": 0.7}),
+            name="sentiment_agent"
+        )
+        valuation_msg = HumanMessage(
+            content=json.dumps({"signal": "bullish", "confidence": 0.6}),
+            name="valuation_agent"
+        )
+
+        state["messages"] = [technical_msg, fundamental_msg, sentiment_msg, valuation_msg]
+
+        result = researcher_bull_agent(state)
+        content = json.loads(result["messages"][0].content)
+
+        assert content["confidence"] <= 0.25
+        assert content["data_sufficiency"]["critical_data_complete"] is False
+        assert "关键数据缺失" in content["reasoning"]
+        assert "关键数据缺失" in content["thesis_points"][0]
+
 
 class TestResearcherBearAgent:
     """测试空头研究员"""

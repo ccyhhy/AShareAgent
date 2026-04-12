@@ -83,6 +83,12 @@ def _is_valid_metric(value: Any) -> bool:
     return True
 
 
+def _is_meaningful_metrics_payload(metrics: dict[str, Any]) -> bool:
+    if not isinstance(metrics, dict) or not metrics:
+        return False
+    return any(_is_valid_metric(value) and float(value) != 0.0 for value in metrics.values())
+
+
 def _dimension_signal(score: int, available_count: int) -> str:
     # When all inputs are missing, keep neutral to avoid false bearish confidence spikes.
     if available_count == 0:
@@ -215,6 +221,7 @@ def fundamentals_agent(state: AgentState):
 
     stock_code = data.get("ticker") or data.get("stock_symbol")
     metrics = data["financial_metrics"][0]
+    metrics_available = _is_meaningful_metrics_payload(metrics)
 
     retrieved_refs: list[dict[str, Any]] = []
     memory_scope = _build_memory_scope(stock_code)
@@ -237,6 +244,77 @@ def fundamentals_agent(state: AgentState):
             memory_scope["error"] = str(exc)
     else:
         memory_scope["status"] = "no_stock_code"
+
+    # Initialize signals list for different fundamental aspects
+    signals = []
+    reasoning = {}
+
+    if not metrics_available:
+        overall_signal = "neutral"
+        confidence_text = "25%"
+        memory_delta = _build_memory_delta(
+            current_signal=overall_signal,
+            current_confidence=confidence_text,
+            retrieved_refs=retrieved_refs,
+        )
+        reasoning["data_quality"] = {
+            "available_dimensions": "0/4",
+            "coverage_ratio": 0.0,
+            "critical_data_complete": bool(data.get("critical_data_complete", False)),
+            "missing_critical_data": list(data.get("missing_critical_data", ["financial_metrics"])),
+            "note": "关键财务指标缺失，基本面分析降级为不可操作中性。",
+        }
+        reasoning["memory_comparison"] = memory_delta["summary"]
+        message_content = {
+            "agent_type": "rule_engine",
+            "analysis_mode": "memory_enhanced_rule_engine",
+            "signal": overall_signal,
+            "confidence": confidence_text,
+            "reasoning": reasoning,
+            "retrieved_refs": retrieved_refs,
+            "memory_scope": memory_scope,
+            "memory_delta": memory_delta,
+            "data_sufficiency": {
+                "sufficient": False,
+                "reason": "financial_metrics_missing",
+            },
+        }
+
+        message = HumanMessage(
+            content=json.dumps(message_content),
+            name="fundamentals_agent",
+        )
+
+        if show_reasoning:
+            show_agent_reasoning(message_content, "Fundamental Analysis Agent")
+
+        updated_data = dict(data)
+        agent_outputs = _ensure_agent_outputs(updated_data)
+        agent_outputs["fundamentals"] = message_content
+        updated_data["fundamental_analysis"] = message_content
+        state["metadata"]["agent_reasoning"] = message_content
+
+        if stock_code:
+            try:
+                if knowledge_base is None:
+                    knowledge_base = _get_knowledge_base()
+                memory_payload = dict(message_content)
+                memory_payload["retrieved_refs"] = _sanitize_memory_refs(retrieved_refs)
+                knowledge_base.save_fundamentals_memory(
+                    stock_code=str(stock_code),
+                    analysis_payload=memory_payload,
+                    run_id=state.get("metadata", {}).get("run_id"),
+                    analysis_date=data.get("end_date"),
+                )
+            except Exception as exc:
+                logger.warning("Fundamentals memory save skipped: %s", exc)
+
+        show_workflow_status("Fundamentals Analyst", "completed")
+        return {
+            "messages": [message],
+            "data": updated_data,
+            "metadata": state["metadata"],
+        }
 
     # Initialize signals list for different fundamental aspects
     signals = []
@@ -411,6 +489,8 @@ def fundamentals_agent(state: AgentState):
     reasoning["data_quality"] = {
         "available_dimensions": f"{len(informative_signals)}/{len(signals)}",
         "coverage_ratio": round(len(informative_signals) / len(signals), 2),
+        "critical_data_complete": bool(data.get("critical_data_complete", False)),
+        "missing_critical_data": list(data.get("missing_critical_data", [])),
         "note": (
             "Fundamental inputs are sparse; confidence has been capped."
             if len(informative_signals) < len(signals)

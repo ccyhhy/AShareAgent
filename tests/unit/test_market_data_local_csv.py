@@ -80,6 +80,10 @@ def test_market_data_agent_uses_local_first_price_history_and_preserves_output_s
     assert result["data"]["end_date"] == "2024-01-31"
     assert result["data"]["agent_outputs"]["market_data"]["ticker"] == "600519"
     assert result["data"]["agent_outputs"]["market_data"]["start_date"] == "2024-01-01"
+    assert result["data"]["agent_outputs"]["market_data"]["critical_data_complete"] is True
+    assert result["data"]["agent_outputs"]["market_data"]["missing_critical_data"] == []
+    assert result["data"]["critical_data_complete"] is True
+    assert result["data"]["missing_critical_data"] == []
 
 
 @pytest.mark.skipif(
@@ -116,3 +120,10 @@ def test_market_data_agent_skips_remote_financial_calls_in_backtest_mode():
     assert result["data"]["financial_line_items"] == [{}]
     assert result["data"]["market_data"] == {"market_cap": 0}
     assert result["data"]["agent_outputs"]["market_data"]["ticker"] == "600519"
+    assert result["data"]["agent_outputs"]["market_data"]["critical_data_complete"] is False
+    assert result["data"]["agent_outputs"]["market_data"]["missing_critical_data"] == [
+        "financial_metrics",
+        "financial_statements",
+        "market_data",
+    ]
+    assert result["data"]["critical_data_complete"] is False
