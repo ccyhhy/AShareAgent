@@ -27,6 +27,7 @@ import AgentDashboard from './components/AgentDashboard';
 import BacktestForm from './components/BacktestForm';
 import BacktestResult from './components/BacktestResult';
 import BacktestStatus from './components/BacktestStatus';
+import DcfWorkbenchPage from './components/DcfWorkbenchPage';
 import HistoryDashboard from './components/HistoryDashboard';
 import LoginForm from './components/LoginForm';
 import PersonalStats from './components/PersonalStats';
@@ -42,6 +43,7 @@ const { Title, Paragraph } = Typography;
 
 type MenuKey =
   | 'dashboard'
+  | 'valuation'
   | 'backtest'
   | 'agents'
   | 'history'
@@ -54,6 +56,10 @@ const PAGE_META: Record<MenuKey, { title: string; subtitle: string }> = {
   dashboard: {
     title: '股票分析与多智能体协作',
     subtitle: '以价值投资为主线，汇总多类 Agent 的分析路径、状态和最终联合决策。',
+  },
+  valuation: {
+    title: 'DCF 估值工具页',
+    subtitle: '把增长率、折现率和现金流假设显式展开，用交互方式展示估值对参数的敏感性。',
   },
   backtest: {
     title: '策略回测实验台',
@@ -90,6 +96,7 @@ function App() {
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
   const [currentBacktestId, setCurrentBacktestId] = useState<string | null>(null);
   const [backtestResult, setBacktestResult] = useState<any>(null);
+  const [latestAnalysisResult, setLatestAnalysisResult] = useState<any>(null);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -135,6 +142,17 @@ function App() {
 
   const handleAnalysisStart = (runId: string) => {
     setCurrentRunId(runId);
+  };
+
+  const handleAnalysisComplete = (result: any) => {
+    setLatestAnalysisResult(result);
+  };
+
+  const handleOpenDcfWorkbench = (result?: any) => {
+    if (result) {
+      setLatestAnalysisResult(result);
+    }
+    setSelectedMenu('valuation');
   };
 
   const handleBacktestStart = (runId: string) => {
@@ -187,13 +205,16 @@ function App() {
           <Space direction="vertical" style={{ width: '100%' }} size="large">
             <AnalysisForm onAnalysisStart={handleAnalysisStart} />
             {currentRunId && (
-              <AnalysisStatus
-                runId={currentRunId}
-                onComplete={(result) => console.log('Analysis completed:', result)}
-              />
-            )}
-          </Space>
-        );
+                <AnalysisStatus
+                  runId={currentRunId}
+                  onComplete={handleAnalysisComplete}
+                  onOpenDcfWorkbench={handleOpenDcfWorkbench}
+                />
+              )}
+            </Space>
+          );
+      case 'valuation':
+        return <DcfWorkbenchPage initialData={latestAnalysisResult} />;
       case 'backtest':
         return (
           <Space direction="vertical" style={{ width: '100%' }} size="large">
@@ -238,6 +259,7 @@ function App() {
 
   const menuItems = [
     { key: 'dashboard', icon: <DashboardOutlined />, label: '股票分析' },
+    { key: 'valuation', icon: <FundOutlined />, label: 'DCF 工具页' },
     ...(hasPermission('backtest:basic')
       ? [{ key: 'backtest', icon: <ExperimentOutlined />, label: '策略回测' }]
       : []),

@@ -1,5 +1,3 @@
-"""RAG utilities for memory-style retrieval."""
+"""Compatibility package for legacy `src.rag.*` imports."""
 
-from .knowledge_base import KnowledgeBase
-
-__all__ = ["KnowledgeBase"]
+from src.rag.knowledge_base import KnowledgeBase  # noqa: F401

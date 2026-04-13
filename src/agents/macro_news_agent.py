@@ -75,14 +75,14 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
         payload_overrides={
             "analysis_domain": "macro_market_news",
             "news_count": 0,
-            "summary": "Ablation 已禁用 macro_news_agent，已跳过全市场新闻综合。",
+            "summary": "Ablation disabled macro_news_agent，已跳过全市场新闻综合。",
             "loaded_from_cache": False,
             "analysis_period": "monthly",
             "summary_generated_on": month_str,
             "backtest_mode": False,
         },
         data_updates={
-            "macro_news_analysis_result": "Ablation 已禁用 macro_news_agent，已跳过全市场新闻综合。"
+            "macro_news_analysis_result": "Ablation disabled macro_news_agent，已跳过全市场新闻综合。"
         },
     )
     if ablation_result is not None:

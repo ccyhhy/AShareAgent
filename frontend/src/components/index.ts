@@ -5,6 +5,7 @@ export { default as RunHistory } from './RunHistory';
 export { default as AgentManagement } from './AgentManagement';
 export { default as DecisionHistory } from './DecisionHistory';
 export { default as ReportView } from './ReportView';
+export { default as DcfWorkbenchPage } from './DcfWorkbenchPage';
 export { default as AgentDashboard } from './AgentDashboard';
 export { default as HistoryDashboard } from './HistoryDashboard';
 export { default as LoginForm } from './LoginForm';

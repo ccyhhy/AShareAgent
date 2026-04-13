@@ -1,39 +1,28 @@
+"""Compatibility helper for ablation configuration."""
+
 from __future__ import annotations
 
 from typing import Any
 
-SUPPORTED_ABLATION_PROFILES = {
-    "full_heterogeneous",
-    "full_homogeneous",
-    "no_rule_agents",
-    "no_llm_agents",
-    "remove_single_agent_x",
-}
-
 
 def build_ablation_config(
-    *,
     profile: str = "full_heterogeneous",
+    *,
     remove_single_agent: str | None = None,
-    homogeneous_agent_type: str = "llm",
+    homogeneous_agent_type: str | None = None,
     disabled_agents: list[str] | None = None,
     disable_agent_types: list[str] | None = None,
+    **extra: Any,
 ) -> dict[str, Any]:
-    normalized_profile = str(profile or "full_heterogeneous").strip().lower()
-    if normalized_profile not in SUPPORTED_ABLATION_PROFILES and not normalized_profile.startswith(
-        "remove_single_agent_"
-    ):
-        raise ValueError(
-            f"Unsupported ablation profile: {profile}. "
-            f"Supported={sorted(SUPPORTED_ABLATION_PROFILES)}"
-        )
-
-    config: dict[str, Any] = {
-        "profile": normalized_profile,
-        "disabled_agents": list(disabled_agents or []),
-        "disable_agent_types": list(disable_agent_types or []),
-        "homogeneous_agent_type": str(homogeneous_agent_type or "llm").strip().lower(),
-    }
+    """Build a normalized ablation config payload expected by legacy callers."""
+    config: dict[str, Any] = {"profile": profile}
     if remove_single_agent:
         config["remove_single_agent"] = remove_single_agent
+    if homogeneous_agent_type:
+        config["homogeneous_agent_type"] = homogeneous_agent_type
+    if disabled_agents:
+        config["disabled_agents"] = list(disabled_agents)
+    if disable_agent_types:
+        config["disable_agent_types"] = list(disable_agent_types)
+    config.update(extra)
     return config

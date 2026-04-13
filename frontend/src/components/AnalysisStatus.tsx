@@ -8,6 +8,7 @@ import { normalizeAnalysisPayload } from '../utils/analysisResult';
 interface AnalysisStatusProps {
   runId: string;
   onComplete?: (result: any) => void;
+  onOpenDcfWorkbench?: (result: any) => void;
 }
 
 interface AgentInsight {
@@ -223,7 +224,7 @@ const extractAgentInsights = (result: any): AgentInsight[] => {
   return [];
 };
 
-const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) => {
+const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete, onOpenDcfWorkbench }) => {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
@@ -521,7 +522,14 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete }) =>
                               <FileTextOutlined /> 分析报告
                             </span>
                           ),
-                          children: <ReportView data={result} />,
+                          children: (
+                            <ReportView
+                              data={result}
+                              onOpenDcfWorkbench={
+                                onOpenDcfWorkbench ? () => onOpenDcfWorkbench(result) : undefined
+                              }
+                            />
+                          ),
                         },
                         {
                           key: 'json',

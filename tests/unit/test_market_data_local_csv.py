@@ -47,13 +47,13 @@ def test_market_data_agent_uses_local_first_price_history_and_preserves_output_s
 
     with patch("src.agents.market_data.get_price_history", return_value=prices) as mock_price_history, patch(
         "src.agents.market_data.get_financial_metrics",
-        return_value=[{"pe_ratio": 20.0}],
+        return_value=[{"pe_ratio": 20.0, "market_cap": 123456789}],
     ), patch(
         "src.agents.market_data.get_financial_statements",
         return_value=[{"revenue": 1000.0}],
     ), patch(
         "src.agents.market_data.get_market_data",
-        return_value={"market_cap": 123456789},
+        return_value={"market_cap": 123456789, "current_price": 999.0, "price_source": "realtime"},
     ), patch(
         "src.agents.market_data.calculate_comprehensive_financial_metrics",
         return_value={"net_margin": 0.25},
@@ -72,14 +72,21 @@ def test_market_data_agent_uses_local_first_price_history_and_preserves_output_s
     content = result["messages"][-1].content
     assert "600519" in content
     assert result["data"]["prices"] == prices.to_dict("records")
-    assert result["data"]["financial_metrics"] == [{"pe_ratio": 20.0, "net_margin": 0.25}]
+    assert result["data"]["financial_metrics"] == [{"pe_ratio": 20.0, "market_cap": 123456789, "net_margin": 0.25}]
     assert result["data"]["financial_line_items"] == [{"revenue": 1000.0}]
     assert result["data"]["market_cap"] == 123456789
-    assert result["data"]["market_data"] == {"market_cap": 123456789}
+    assert result["data"]["market_data"]["market_cap"] == 123456789
+    assert result["data"]["market_data"]["current_price"] == 100.5
+    assert result["data"]["market_data"]["price_source"] == "latest_close"
+    assert result["data"]["market_data"]["price_as_of"] == "2024-01-02"
+    assert result["data"]["market_data"]["price_is_realtime"] is False
     assert result["data"]["start_date"] == "2024-01-01"
     assert result["data"]["end_date"] == "2024-01-31"
     assert result["data"]["agent_outputs"]["market_data"]["ticker"] == "600519"
     assert result["data"]["agent_outputs"]["market_data"]["start_date"] == "2024-01-01"
+    assert result["data"]["agent_outputs"]["market_data"]["latest_available_price"] == 100.5
+    assert result["data"]["agent_outputs"]["market_data"]["price_source"] == "latest_close"
+    assert result["data"]["agent_outputs"]["market_data"]["price_is_realtime"] is False
     assert result["data"]["agent_outputs"]["market_data"]["critical_data_complete"] is True
     assert result["data"]["agent_outputs"]["market_data"]["missing_critical_data"] == []
     assert result["data"]["critical_data_complete"] is True

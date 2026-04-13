@@ -1,7 +1,7 @@
 ﻿"""
-涓婁笅鏂囩鐞嗗櫒妯″潡
+上下文管理器模块
 
-鎻愪緵鍚勭API鐩稿叧鐨勪笂涓嬫枃绠＄悊鍣?
+提供各种API相关的上下文管理器
 """
 
 from contextlib import contextmanager
@@ -10,7 +10,7 @@ import logging
 import sys
 import os
 
-# 娣诲姞椤圭洰鏍圭洰褰曞埌璺緞
+# 添加项目根目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
 
 from ..state import api_state
@@ -21,14 +21,14 @@ logger = logging.getLogger("context_managers")
 _MAX_REASONING_LENGTH = 1000
 _MAX_PREVIEW_LENGTH = 280
 
-# 瀵煎叆鏁版嵁搴撴ā鍨?
+# 导入数据库模型
 try:
     from backend.dependencies import get_database_manager
     from src.database.models import AgentDecisionModel, AnalysisResultModel
     HAS_DATABASE = True
 except ImportError:
     HAS_DATABASE = False
-    logger.warning("鏁版嵁搴撴ā鍨嬪鍏ュけ璐ワ紝灏嗕笉淇濆瓨鍒版暟鎹簱")
+    logger.warning("数据库模型导入失败，将不保存到数据库")
 
 
 @contextmanager

@@ -1,5 +1,3 @@
-"""Experiment utilities."""
+"""Compatibility package for legacy `src.experiments.*` imports."""
 
-from .ablation import SUPPORTED_ABLATION_PROFILES, build_ablation_config
-
-__all__ = ["SUPPORTED_ABLATION_PROFILES", "build_ablation_config"]
+from src.experiments.ablation import build_ablation_config  # noqa: F401

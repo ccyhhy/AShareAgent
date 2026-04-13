@@ -1,10 +1,17 @@
+"""
+日志配置模块
+
+提供统一的日志记录配置和管理功能
+"""
 import logging
+import sys
 import os
+from pathlib import Path
+from datetime import datetime
 from typing import Optional
 
-
 def setup_logger(name: str, log_dir: Optional[str] = None) -> logging.Logger:
-    """Configure a shared logger with console and file handlers."""
+    """配置共享的日志记录器，包含控制台和文件处理器。"""
     logging.getLogger().setLevel(logging.DEBUG)
 
     logger = logging.getLogger(name)
@@ -23,14 +30,16 @@ def setup_logger(name: str, log_dir: Optional[str] = None) -> logging.Logger:
     )
     console_handler.setFormatter(formatter)
 
-    if log_dir is None:
-        log_dir = os.path.join(
+    # 修复：将参数名称统一，正确引用传入的参数
+    log_directory = log_dir
+    if log_directory is None:
+        log_directory = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
             "logs",
         )
 
-    os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f"{name}.log")
+    os.makedirs(log_directory, exist_ok=True)
+    log_file = os.path.join(log_directory, f"{name}.log")
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(logging.DEBUG)
     file_handler.setFormatter(formatter)
@@ -41,7 +50,7 @@ def setup_logger(name: str, log_dir: Optional[str] = None) -> logging.Logger:
     return logger
 
 
-# ASCII-safe markers avoid UnicodeEncodeError on Windows GBK terminals.
+# ASCII-safe markers避免Windows GBK终端上的UnicodeEncodeError。
 SUCCESS_ICON = "[OK]"
 ERROR_ICON = "[ERR]"
 WAIT_ICON = "[WAIT]"

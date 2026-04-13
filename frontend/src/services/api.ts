@@ -126,6 +126,56 @@ export interface AnalysisStatus {
   result?: AnalysisResult;
 }
 
+export interface DcfAssumptions {
+  ticker: string;
+  currentPrice: number;
+  marketCap: number;
+  sharesOutstanding: number;
+  netDebt: number;
+  baseFreeCashFlow: number;
+  stage1GrowthRatePct: number;
+  stage1Years: number;
+  stage2GrowthRatePct: number;
+  stage2Years: number;
+  terminalGrowthRatePct: number;
+  discountRatePct: number;
+  taxRatePct: number;
+  beta: number;
+  equityRiskPremiumPct: number;
+  riskFreeRatePct: number;
+  debtCostPct: number;
+  debtRatioPct: number;
+  terminalMethod: 'gordon' | 'multiple';
+  terminalMultiple: number;
+}
+
+export interface DcfProjectionRow {
+  year: number;
+  phase: string;
+  projectedFcf: number;
+  discountedFcf: number;
+}
+
+export interface DcfWorkbenchPayload {
+  sourceLabel: string;
+  assumptions: DcfAssumptions;
+}
+
+export interface DcfWorkbenchResult {
+  isValid: boolean;
+  reasons: string[];
+  enterpriseValue: number;
+  equityValue: number;
+  intrinsicValuePerShare: number;
+  marketCap: number;
+  currentPrice: number;
+  marginOfSafety: number | null;
+  conclusion: string;
+  sensitivityHint: string;
+  projectionRows: DcfProjectionRow[];
+  discountedTerminalValue: number;
+}
+
 // Agent接口
 export interface Agent {
   name: string;

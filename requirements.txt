@@ -1,0 +1,17 @@
+akshare>=1.9.30
+yfinance>=0.2.18
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+langchain>=0.2.0
+langgraph>=0.2.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.17.0
+playwright>=1.40.0
+psutil>=5.9.0

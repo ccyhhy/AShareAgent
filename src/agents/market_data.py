@@ -69,6 +69,45 @@ def _has_meaningful_market_data(market_data: dict) -> bool:
     return False
 
 
+def _extract_latest_close(prices_df: pd.DataFrame) -> tuple[float | None, str | None]:
+    if not isinstance(prices_df, pd.DataFrame) or prices_df.empty or "close" not in prices_df.columns:
+        return None, None
+
+    valid_rows = prices_df.dropna(subset=["close"])
+    if valid_rows.empty:
+        return None, None
+
+    last_row = valid_rows.iloc[-1]
+    close_value = last_row.get("close")
+    if not isinstance(close_value, (int, float)):
+        try:
+            close_value = float(close_value)
+        except (TypeError, ValueError):
+            return None, None
+
+    date_value = last_row.get("date")
+    if isinstance(date_value, pd.Timestamp):
+        price_as_of = date_value.strftime("%Y-%m-%d")
+    elif isinstance(date_value, datetime):
+        price_as_of = date_value.strftime("%Y-%m-%d")
+    elif date_value is None:
+        price_as_of = None
+    else:
+        price_as_of = str(date_value)[:10]
+
+    return float(close_value), price_as_of
+
+
+def _extract_market_cap(financial_metrics: list[dict]) -> float | None:
+    if not financial_metrics:
+        return None
+    first = financial_metrics[0] if isinstance(financial_metrics[0], dict) else {}
+    if not isinstance(first, dict):
+        return None
+    value = first.get("market_cap")
+    return value if isinstance(value, (int, float)) and value > 0 else None
+
+
 
 
 @agent_endpoint("market_data", "市场数据收集与预处理")
@@ -196,6 +235,26 @@ def market_data_agent(state: AgentState):
     if not isinstance(prices_df, pd.DataFrame):
         prices_df = pd.DataFrame(columns=["close", "open", "high", "low", "volume"])
 
+    if not isinstance(market_data, dict):
+        market_data = {}
+
+    latest_available_price, price_as_of = _extract_latest_close(prices_df)
+    if latest_available_price is not None:
+        market_data["current_price"] = latest_available_price
+        market_data["price_source"] = "latest_close"
+        market_data["price_is_realtime"] = False
+        if price_as_of:
+            market_data["price_as_of"] = price_as_of
+
+    market_cap_value = market_data.get("market_cap")
+    if not isinstance(market_cap_value, (int, float)) or market_cap_value <= 0:
+        fallback_market_cap = _extract_market_cap(financial_metrics)
+        if fallback_market_cap is not None:
+            market_cap_value = fallback_market_cap
+            market_data["market_cap"] = fallback_market_cap
+        else:
+            market_cap_value = 0
+
     prices_dict = prices_df.to_dict("records")
 
     price_ok = len(prices_dict) > 0
@@ -232,6 +291,9 @@ def market_data_agent(state: AgentState):
             "包含价格历史、财务指标、财务报表与市场画像。"
         )
 
+    if latest_available_price is not None and price_as_of:
+        summary += f" 价格统一按最近可用收盘价口径处理（{price_as_of}，{latest_available_price:.2f}）。"
+
     coverage_ratio = round(
         (4 - len(missing_components)) / 4,
         2,
@@ -258,6 +320,10 @@ def market_data_agent(state: AgentState):
             for component in missing_components
             if component in {"financial_metrics", "financial_statements", "market_data"}
         ],
+        "latest_available_price": market_data.get("current_price"),
+        "price_source": market_data.get("price_source"),
+        "price_as_of": market_data.get("price_as_of"),
+        "price_is_realtime": market_data.get("price_is_realtime", False),
         "data_quality": {
             "missing_components": missing_components,
             "missing_components_readable": missing_components_cn,
@@ -283,7 +349,7 @@ def market_data_agent(state: AgentState):
         "end_date": end_date,
         "financial_metrics": financial_metrics,
         "financial_line_items": financial_line_items,
-        "market_cap": market_data.get("market_cap", 0),
+        "market_cap": market_cap_value,
         "market_data": market_data,
         "critical_data_complete": critical_data_complete,
         "missing_critical_data": market_data_summary["missing_critical_data"],
