@@ -40,6 +40,22 @@ export interface ApiResponse<T = any> {
   error?: string;
 }
 
+function normalizeApiResponse<T>(payload: ApiResponse<T> | T): ApiResponse<T> {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    'success' in (payload as Record<string, unknown>)
+  ) {
+    return payload as ApiResponse<T>;
+  }
+
+  return {
+    success: true,
+    data: payload as T,
+    message: 'OK',
+  };
+}
+
 // 分析相关接口
 export interface AnalysisRequest {
   ticker: string;
@@ -354,7 +370,7 @@ export class ApiService {
   // Agent相关
   static async getAgents(): Promise<ApiResponse<Agent[]>> {
     const response = await api.get('/api/agents/');
-    return response.data;
+    return normalizeApiResponse<Agent[]>(response.data);
   }
 
   static async getAgent(agentName: string): Promise<ApiResponse<Agent>> {
@@ -401,7 +417,7 @@ export class ApiService {
     if (params?.limit) queryParams.append('limit', params.limit.toString());
     
     const response = await api.get(`/logs/?${queryParams.toString()}`);
-    return response.data;
+    return normalizeApiResponse<any[]>(response.data);
   }
 
   // Agent管理相关

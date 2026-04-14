@@ -191,6 +191,12 @@ AShareAgent/
 
 `/logs/`和`/runs/`端点则直接返回其查询结果对应的Pydantic模型列表或对象。
 
+### API契约规则
+
+- `/api/*` 路由返回标准 `ApiResponse` 包装格式（包含 `success`、`message`、`data`）。
+- `/logs/` 和 `/runs/` 为兼容旧版的遗留路由，保持原始列表或对象响应，不做包装。
+- 大多数业务接口需要 `Bearer Token` 认证；匿名访问通常会返回 `401` 或 `403`。
+
 ## 权限系统
 
 ### 角色定义

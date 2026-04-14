@@ -34,11 +34,11 @@ agent_model = AgentModel(db_manager)
 decision_model = AgentDecisionModel(db_manager)
 
 
-@router.get("/", response_model=List[AgentInfo])
+@router.get("/", response_model=ApiResponse[List[AgentInfo]])
 async def list_agents():
     """获取所有Agent列表"""
     agents = api_state.get_all_agents()
-    return agents
+    return ApiResponse(success=True, message="鑾峰彇Agent鍒楄〃鎴愬姛", data=agents)
 
 
 # Agent管理相关API (必须在参数化路由之前定义)
