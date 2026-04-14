@@ -1,5 +1,5 @@
 param(
-    [string]$PythonExe = "C:\Users\35661\miniconda3\envs\ashare-agent\python.exe",
+    [string]$PythonExe = "",
     [string]$BindHost = "127.0.0.1",
     [int]$BackendPort = 8000,
     [int]$FrontendPort = 5173,
@@ -79,8 +79,29 @@ function Stop-ProcessTree {
 $repoRoot = $PSScriptRoot
 $frontendDir = Join-Path $repoRoot "frontend"
 
-if (-not (Test-Path $PythonExe)) {
-    throw "Python executable not found: $PythonExe"
+if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+    $candidatePaths = @(
+        (Join-Path $repoRoot ".venv\Scripts\python.exe"),
+        (Join-Path $repoRoot "venv\Scripts\python.exe")
+    )
+
+    foreach ($candidate in $candidatePaths) {
+        if (Test-Path $candidate) {
+            $PythonExe = $candidate
+            break
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($PythonExe)) {
+        $pythonCmd = Get-Command "python" -ErrorAction SilentlyContinue
+        if ($pythonCmd) {
+            $PythonExe = $pythonCmd.Source
+        }
+    }
+}
+
+if (-not $PythonExe -or -not (Test-Path $PythonExe)) {
+    throw "Python executable not found. Set -PythonExe or create a .venv/venv in the repository root."
 }
 if (-not (Test-Path $frontendDir)) {
     throw "Frontend directory not found: $frontendDir"

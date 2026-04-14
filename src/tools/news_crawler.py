@@ -75,7 +75,7 @@ def extract_domain(url: str) -> str:
     try:
         parsed = urlparse(url)
         return parsed.netloc
-    except:
+    except (ValueError, AttributeError):
         return "未知来源"
 
 
@@ -240,7 +240,7 @@ def convert_search_results_to_news_format(search_results, symbol: str) -> list:
                                 year, month, day = date_match.groups()
                                 publish_time = f"{year}-{month.zfill(2)}-{day.zfill(2)} 00:00:00"
                         break
-                    except:
+                    except (ValueError, TypeError, AttributeError):
                         continue
 
         # 增强内容信息
@@ -299,7 +299,7 @@ def get_stock_news_via_akshare(symbol: str, max_news: int = 10) -> list:
 
                 # 只去除首尾空白字符
                 content = content.strip()
-                if len(content) < 10:  # 内容太短的跳过
+                if len(content) < 5:  # 内容过短才跳过
                     continue
 
                 # 获取关键词
@@ -429,7 +429,7 @@ def get_stock_news(symbol: str, max_news: int = 10, date: str = None) -> list:
     # 按发布时间排序（如果有发布时间信息）
     try:
         final_news.sort(key=lambda x: x.get("publish_time", ""), reverse=True)
-    except:
+    except (TypeError, AttributeError):
         pass  # 如果排序失败，保持原顺序
 
     # 只保留指定条数的新闻

@@ -34,7 +34,9 @@
       "Bash(npm install)",
       "Bash(poetry --version)",
       "Bash(kill:*)",
-      "Bash(poetry check:*)"
+      "Bash(poetry check:*)",
+      "Bash(\"/e/codework/graduation design/.venv/Scripts/python.exe\" -m pytest -q --maxfail=5)",
+      "WebSearch"
     ],
     "deny": []
   }

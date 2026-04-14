@@ -53,7 +53,7 @@ def test_sentiment_agent_backtest_mode_skips_remote_calls(monkeypatch):
     assert output["signal"] == "neutral"
     assert output["confidence"] == "50%"
     assert output["sentiment_score"] == 0.0
-    assert "Backtest mode active" in output["reasoning"]
+    assert "回测模式" in output["reasoning"]
 
 
 @pytest.mark.skipif(not LANGCHAIN_CORE_AVAILABLE, reason="langchain_core is not installed in this environment")
@@ -122,7 +122,7 @@ def test_debate_room_backtest_mode_skips_llm_call(monkeypatch):
 
     assert llm_mock.call_count == 0
     assert output["llm_score"] == 0
-    assert "Backtest mode active" in (output.get("llm_analysis") or "")
+    assert "回测模式" in str(output.get("llm_analysis", ""))
 
 
 def _build_portfolio_state() -> dict:
@@ -162,4 +162,4 @@ def test_portfolio_manager_backtest_mode_skips_llm_call(monkeypatch):
 
     assert llm_mock.call_count == 0
     assert decision["action"] == "hold"
-    assert "Backtest mode active" in decision["reasoning"]
+    assert "回测模式" in decision["reasoning"]

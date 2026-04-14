@@ -178,7 +178,7 @@ const BacktestStatus: React.FC<BacktestStatusProps> = ({ runId, onComplete }) =>
     >
       <div className="status-hero">
         <div className="status-hero-main">
-          <span className="section-kicker">Experiment Runtime</span>
+          <span className="section-kicker">实验运行环境</span>
           <h3>
             {status.ticker} · {statusMeta.title}
           </h3>

@@ -54,6 +54,8 @@ const AGENT_LABELS: Record<string, string> = {
   risk_manager: '风险管理',
   macro_analyst: '宏观分析师',
   portfolio_manager: '组合经理',
+  policy_impact: '政策影响',
+  liquidity: '流动性评估',
 };
 
 const toText = (value: unknown, fallback = ''): string => {

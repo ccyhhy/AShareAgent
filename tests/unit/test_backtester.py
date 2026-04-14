@@ -22,7 +22,7 @@ import os
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
 
-from src.backtester import Backtester, Trade, PerformanceMetrics, RiskMetrics
+from src.backtesting import IntelligentBacktester as Backtester, Trade, PerformanceMetrics, RiskMetrics
 
 
 class TestBacktesterInitialization:
@@ -318,7 +318,7 @@ class TestAgentDecisionProcessing:
         
         backtester.agent.return_value = mock_result
         
-        with patch('src.backtester.get_price_data') as mock_price:
+        with patch('src.backtesting.backtester.get_price_data') as mock_price:
             mock_price.return_value = pd.DataFrame({
                 'open': [10.0], 'close': [10.5], 'high': [10.8], 'low': [9.8]
             })
@@ -377,7 +377,7 @@ class TestDataIntegration:
             num_of_news=5
         )
         
-    @patch('src.backtester.get_price_data')
+    @patch('src.data.pricing.backtester.get_price_data')
     def test_price_data_integration(self, mock_price_data, backtester):
         """测试价格数据集成"""
         # 模拟价格数据
@@ -437,7 +437,7 @@ class TestErrorHandling:
         """测试缺失价格数据的处理"""
         backtester.agent.return_value = json.dumps({"action": "buy", "quantity": 100})
         
-        with patch('src.backtester.get_price_data') as mock_price:
+        with patch('src.backtesting.backtester.get_price_data') as mock_price:
             mock_price.return_value = None  # 模拟数据获取失败
             
             result = backtester.get_agent_decision("2024-01-01", "2023-12-01", backtester.portfolio)
@@ -450,7 +450,7 @@ class TestErrorHandling:
         """测试空数据框处理"""
         backtester.agent.return_value = json.dumps({"action": "buy", "quantity": 100})
         
-        with patch('src.backtester.get_price_data') as mock_price:
+        with patch('src.backtesting.backtester.get_price_data') as mock_price:
             mock_price.return_value = pd.DataFrame()  # 空数据框
             
             result = backtester.get_agent_decision("2024-01-01", "2023-12-01", backtester.portfolio)
@@ -484,7 +484,7 @@ class TestBacktesterIntegration:
         })
         
         # 模拟价格数据
-        with patch('src.backtester.get_price_data') as mock_price:
+        with patch('src.backtesting.backtester.get_price_data') as mock_price:
             mock_price.return_value = pd.DataFrame({
                 'open': [10.0],
                 'close': [10.5],

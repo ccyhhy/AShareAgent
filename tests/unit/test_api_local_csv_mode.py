@@ -139,7 +139,10 @@ def test_get_price_history_allows_remote_when_preference_is_remote_api(tmp_path:
     )
 
     with patch.dict("os.environ", {"ASHAREAGENT_ALLOW_REMOTE_FALLBACK": "0"}, clear=False):
-        with patch("src.tools.api.ak.stock_zh_a_hist", return_value=remote_df):
+        with patch("src.tools.api._get_price_history_tencent", side_effect=Exception("tencent unavailable")), patch(
+            "src.tools.api.ak.stock_zh_a_hist",
+            return_value=remote_df,
+        ):
             with patch.object(api_module.logger, "info") as mock_info:
                 result = get_price_history(
                     "600519",

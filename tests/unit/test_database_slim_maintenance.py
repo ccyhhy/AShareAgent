@@ -51,7 +51,7 @@ def test_rebuild_database_with_compaction_preserves_rows_and_compacts_json(tmp_p
     source_db = tmp_path / "source.db"
     target_db = tmp_path / "target.db"
 
-    schema_sql = (Path(__file__).resolve().parents[2] / "src" / "database" / "schema.sql").read_text(
+    schema_sql = (Path(__file__).resolve().parents[2] / "src" / "models" / "schema.sql").read_text(
         encoding="utf-8"
     )
 

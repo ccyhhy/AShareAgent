@@ -48,10 +48,9 @@ const AnalysisForm: React.FC<AnalysisFormProps> = ({ onAnalysisStart }) => {
         className="modern-form"
         initialValues={{
           show_reasoning: true,
-          num_of_news: 5,
+          num_of_news: 20,
           initial_capital: 100000,
           initial_position: 0,
-          show_summary: false
         }}
       >
         <Form.Item
@@ -113,15 +112,6 @@ const AnalysisForm: React.FC<AnalysisFormProps> = ({ onAnalysisStart }) => {
             placeholder="选择结束日期"
             format="YYYY-MM-DD"
           />
-        </Form.Item>
-
-        <Form.Item
-          label="显示详细摘要"
-          name="show_summary"
-          valuePropName="checked"
-          tooltip="显示美观的摘要报告"
-        >
-          <Switch />
         </Form.Item>
 
         <Form.Item>

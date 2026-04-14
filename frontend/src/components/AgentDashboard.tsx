@@ -432,7 +432,7 @@ const AgentDashboard: React.FC = () => {
       >
         <div className="agents-toolbar">
           <div>
-            <Text className="agents-toolbar-kicker">Heterogeneous Control Plane</Text>
+            <Text className="agents-toolbar-kicker">异构控制平面</Text>
             <Paragraph className="agents-toolbar-copy">
               指南要求这里能直观看到各类 Agent 的异构分布。当前页面会优先突出
               `agent_type`，便于后续联调时直接对照规则引擎、量化模型、统计模型与 LLM 节点。
@@ -657,7 +657,7 @@ const AgentDashboard: React.FC = () => {
           <>
             <div className="agent-detail-hero">
               <div>
-                <Text className="agents-toolbar-kicker">Agent Profile</Text>
+                <Text className="agents-toolbar-kicker">智能体档案</Text>
                 <h3>{selectedAgent.display_name || selectedAgent.name}</h3>
                 <p>{selectedAgent.description || getTypeMeta(selectedAgent.agent_type).description}</p>
               </div>

@@ -18,22 +18,22 @@ from src.tools.openrouter_config import get_chat_completion
 from langchain_core.messages import HumanMessage  # Added import
 
 # LLM Prompt for analyzing full news data
-LLM_PROMPT_MACRO_ANALYSIS = """浣犳槸涓€鍚嶈祫娣辩殑A鑲″競鍦哄畯瑙傚垎鏋愬笀銆傝鏍规嵁浠ヤ笅鎻愪緵鐨勬勃娣?00鎸囨暟锛堜唬鐮侊細000300锛夊綋鏃ョ殑**鍏ㄩ儴鏂伴椈鏁版嵁**锛岃繘琛屾繁鍏ュ垎鏋愬苟鐢熸垚涓€浠戒笓涓氱殑瀹忚鎬荤粨鎶ュ憡銆?
+LLM_PROMPT_MACRO_ANALYSIS = """你是一名资深的A股市场宏观分析师。请根据以下提供的沪深300指数（代码：000300）当日的**全部新闻数据**，进行深入分析并生成一份专业的宏观总结报告。
 
-鎶ュ憡搴斿寘鍚互涓嬪嚑涓柟闈細
-1.  **甯傚満鎯呯华瑙ｈ**锛氭暣浣撹瘎浼板綋鍓嶅競鍦烘儏缁紙濡傦細涔愯銆佽皑鎱庛€佹偛瑙傦級锛屽苟绠€杩板垽鏂緷鎹€?
-2.  **鐑偣鏉垮潡璇嗗埆**锛氭壘鍑烘柊闂讳腑鍙嶆槧鍑虹殑1-3涓富瑕佺儹鐐规澘鍧楁垨涓婚锛屽苟璇存槑鍏堕┍鍔ㄥ洜绱犮€?
-3.  **娼滃湪椋庨櫓鎻愮ず**锛氭彮绀烘柊闂讳腑鍙兘闅愯棌鐨?-2涓畯瑙傚眰闈㈡垨甯傚満灞傞潰鐨勬綔鍦ㄩ闄╃偣銆?
-4.  **鏀跨瓥褰卞搷鍒嗘瀽**锛氬鏋滄柊闂绘彁鍙婇噸瑕佹斂绛栧彉鍔紝璇峰垎鏋愬叾鍙兘瀵瑰競鍦轰骇鐢熺殑鐭湡鍜岄暱鏈熷奖鍝嶃€?
-5.  **缁煎悎灞曟湜**锛氬熀浜庝互涓婂垎鏋愶紝瀵圭煭鏈熷競鍦鸿蛋鍔跨粰鍑轰竴涓畝鏄庢壖瑕佺殑灞曟湜銆?
+报告应包含以下几个方面：
+1.  **市场情绪解读**：整体评估当前市场情绪（如：乐观、谨慎、悲观），并简述判断依据。
+2.  **热点板块识别**：找出新闻中反映出的1-3个主要热点板块或主题，并说明其驱动因素。
+3.  **潜在风险提示**：揭示新闻中可能隐藏的1-2个宏观层面或市场层面的潜在风险点。
+4.  **政策影响分析**：如果新闻提及重要政策变动，请分析其可能对市场产生的短期和长期影响。
+5.  **综合展望**：基于以上分析，对短期市场走势给出一个简明扼要的展望。
 
-璇风‘淇濆垎鏋愬瑙傘€侀€昏緫娓呮櫚锛岃瑷€涓撲笟銆傜洿鎺ヨ繑鍥炲垎鏋愭姤鍛婂唴瀹癸紝涓嶈鍖呭惈浠讳綍棰濆璇存槑鎴栧濂楄瘽銆?
+请确保分析客观、逻辑清晰，语言专业。直接返回分析报告内容，不要包含任何额外说明或客套话。
 
-**褰撴棩鏂伴椈鏁版嵁濡備笅锛?*
+**当日新闻数据如下：**
 {news_data_json_string}
 """
 
-# 鍒濆鍖?logger
+# 初始化 logger
 logger = setup_logger('macro_news_agent')
 
 
@@ -49,19 +49,19 @@ def _is_backtest_mode() -> bool:
 @agent_endpoint("macro_news_agent", "Macro market-news agent for monthly market-wide news synthesis")
 def macro_news_agent(state: AgentState) -> Dict[str, Any]:
     """
-    鑾峰彇娌繁300鍏ㄩ噺鏂伴椈锛岃皟鐢↙LM杩涜瀹忚鍒嗘瀽锛屽苟淇濆瓨缁撴灉銆?
-    璇gent鐙珛杩愯锛屼笉渚濊禆鐗瑰畾涓婃父鏁版嵁锛岀粨鏋滄敞鍏gentState銆?
+    获取沪深300全量新闻，调用LLM进行宏观分析，并保存结果。
+    该Agent独立运行，不依赖特定上游数据，结果注入AgentState。
     """
     agent_name = "macro_news_agent"
     show_workflow_status(f"{agent_name}: --- Executing Macro News Agent ---")
-    symbol = "000300"  # 娌繁300鎸囨暟
+    symbol = "000300"  # 沪深300指数
     news_list_for_llm: List[Dict[str, str]] = []
-    summary = f"瀹忚鏂伴椈鍒嗘瀽杩囩▼涓彂鐢熼敊璇? 鏈煡閿欒"  # Default error summary
+    summary = f"宏观新闻分析过程中发生错误: 未知错误"  # Default error summary
     retrieved_news_count = 0
     from_cache = False  # Flag to indicate if summary was loaded from cache
 
     today_str = datetime.now().strftime("%Y-%m-%d")
-    # 鏀逛负鎸夋湀缂撳瓨锛氫娇鐢ㄥ勾-鏈堜綔涓虹紦瀛橀敭
+    # 改为按月缓存：使用年-月作为缓存键
     month_str = datetime.now().strftime("%Y-%m")
     output_file_path = os.path.join("data", "macro_summary.json")
 
@@ -144,7 +144,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
         try:
             with open(output_file_path, 'r', encoding='utf-8') as f:
                 all_summaries = json.load(f)
-            # 妫€鏌ユ湰鏈堟槸鍚﹀凡鏈夌紦瀛?
+            # 检查本月是否已有缓存
             if month_str in all_summaries and all_summaries[month_str].get("summary_content"):
                 cached_data = all_summaries[month_str]
                 summary = cached_data["summary_content"]
@@ -153,14 +153,27 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
                     "No macro news data was retrieved today.": "今日未检索到可用的宏观新闻数据。",
                 }
                 summary = legacy_summary_map.get(summary, summary)
-                retrieved_news_count = cached_data.get(
-                    "retrieved_news_count", 0)  # Get cached news count
-                from_cache = True
-                show_workflow_status(
-                    f"{agent_name}: loaded cached macro summary for {month_str}."
-                )
-                show_agent_reasoning(
-                    f"Loaded macro summary for {month_str} from cache. News count: {retrieved_news_count}", agent_name)
+
+                # 检查缓存内容是否无效（如 LLM 失败占位符）
+                INVALID_SUMMARY_CONTENTS = {
+                    "LLM分析未返回有效结果。",
+                    "今日未检索到可用的宏观新闻数据。",
+                }
+                if summary in INVALID_SUMMARY_CONTENTS:
+                    show_agent_reasoning(
+                        f"缓存摘要内容无效（'{summary}'），视为缓存过期，将重新抓取",
+                        agent_name,
+                    )
+                    from_cache = False
+                else:
+                    retrieved_news_count = cached_data.get(
+                        "retrieved_news_count", 0)  # Get cached news count
+                    from_cache = True
+                    show_workflow_status(
+                        f"{agent_name}: loaded cached macro summary for {month_str}."
+                    )
+                    show_agent_reasoning(
+                        f"Loaded macro summary for {month_str} from cache. News count: {retrieved_news_count}", agent_name)
         except json.JSONDecodeError:
             show_agent_reasoning(
                 f"JSONDecodeError for {output_file_path} when trying to load cache. Will fetch fresh data.", agent_name)
@@ -228,7 +241,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
             )
             summary = f"宏观新闻分析失败：{str(e)}"
 
-    # 淇濆瓨鎬荤粨鍒癑SON鏂囦欢 (only if not from cache and successful, or if updating existing)
+    # 保存总结到JSON文件 (only if not from cache and successful, or if updating existing)
     if not from_cache:  # Also save if summary was updated, even if initially from cache but e.g. re-analyzed
         show_workflow_status(
             f"{agent_name}: Preparing to save summary to {output_file_path}")
@@ -251,7 +264,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
             "summary_content": summary,
             "retrieved_news_count": retrieved_news_count,
             "last_updated": datetime.now().isoformat(),
-            "analysis_date": today_str  # 璁板綍瀹為檯鍒嗘瀽鐨勬棩鏈?
+            "analysis_date": today_str  # 记录实际分析的日期
         }
         all_summaries[month_str] = current_summary_details
 
@@ -259,9 +272,9 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
             with open(output_file_path, 'w', encoding='utf-8') as f:
                 json.dump(all_summaries, f, ensure_ascii=False, indent=4)
             show_workflow_status(
-                f"{agent_name}: 瀹忚鏂伴椈鎬荤粨宸蹭繚瀛樺埌: {output_file_path}")
+                f"{agent_name}: 宏观新闻总结已保存到: {output_file_path}")
         except Exception as e:
-            show_workflow_status(f"{agent_name}: 淇濆瓨瀹忚鏂伴椈鎬荤粨鏂囦欢澶辫触: {e}")
+            show_workflow_status(f"{agent_name}: 保存宏观新闻总结文件失败: {e}")
             show_agent_reasoning(
                 f"Failed to save summary to {output_file_path}: {str(e)}", agent_name)
 
@@ -272,7 +285,7 @@ def macro_news_agent(state: AgentState) -> Dict[str, Any]:
 
     agent_details_for_metadata = {
         "summary_generated_on": month_str,
-        "analysis_period": "monthly",  # 鏂板瀛楁琛ㄧず鍒嗘瀽鍛ㄦ湡
+        "analysis_period": "monthly",  # 新增字段表示分析周期
         "news_count_for_summary": retrieved_news_count,
         "llm_summary_preview": summary[:150] + "..." if len(summary) > 150 else summary,
         "loaded_from_cache": from_cache

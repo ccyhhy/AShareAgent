@@ -308,12 +308,12 @@ function App() {
           <div className="logo">
             <BarChartOutlined className="logo-icon" />
             <div className="logo-copy">
-              <span className="logo-text">A-Share Agent Desk</span>
+              <span className="logo-text">A股智能分析终端</span>
               <span className="logo-subtitle">基于异构多智能体的 A 股价值投资分析系统</span>
             </div>
           </div>
           <div className="sider-status-card">
-            <span className="sider-status-kicker">Intelligence Hub</span>
+            <span className="sider-status-kicker">智能中心</span>
             <strong>{hasPermission('system:monitor') ? '6' : '4'} 个活跃节点</strong>
           </div>
         </div>
@@ -351,7 +351,7 @@ function App() {
           <div className="app-user-area">
             <div className="market-pill">
               <span className="market-dot" />
-              市场状态 OPEN
+              市场状态：交易中
             </div>
             <Button type="text" className="header-icon-button" icon={<ReloadOutlined />} />
             <Button type="text" className="header-icon-button" icon={<BellOutlined />} />
@@ -373,7 +373,7 @@ function App() {
           <Content className="app-content">
             <div className="app-content-header">
               <div className="app-content-header-main">
-                <div className="app-content-kicker">A-Share Multi-Agent Workflow</div>
+                <div className="app-content-kicker">A股多智能体工作流</div>
                 <Title level={2} className="app-content-title">
                   {PAGE_META[selectedMenu].title}
                 </Title>

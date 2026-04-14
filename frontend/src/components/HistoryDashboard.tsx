@@ -232,6 +232,31 @@ const HistoryDashboard: React.FC = () => {
   }, []);
 
 
+  
+const formatAgentName = (name: string) => {
+  const AGENT_LABELS: Record<string, string> = {
+    market_data: '数据层', technicals: '相对估值', fundamentals: '基本面',
+    sentiment: '情绪面', valuation: 'DCF 估值', macro_news_agent: '宏观新闻',
+    researcher_bull: '多头研究员', researcher_bear: '空头研究员', debate_room: '多空辩论',
+    risk_manager: '风险管理', macro_analyst: '宏观分析师', portfolio_manager: '组合经理',
+    policy_impact: '政策影响', liquidity: '流动性评估',
+  };
+  return AGENT_LABELS[name] || name;
+};
+
+const formatDecisionType = (type: string) => {
+  const t = type?.toUpperCase() || 'UNKNOWN';
+  if (t === 'BUY') return '买入';
+  if (t === 'SELL') return '卖出';
+  if (t === 'HOLD') return '持有';
+  if (t === 'ANALYSIS') return '分析';
+  if (t === 'COMPLETED') return '已完成';
+  if (t === 'RUNNING') return '运行中';
+  if (t === 'PENDING') return '等待中';
+  if (t === 'FAILED') return '失败';
+  return t;
+};
+
   const getDecisionTypeColor = (type: string) => {
     switch (type?.toLowerCase()) {
       case 'buy': return 'error';  // Red for buy (A-share convention)
@@ -268,7 +293,7 @@ const HistoryDashboard: React.FC = () => {
       dataIndex: 'agent_display_name',
       key: 'agent_display_name',
       width: 120,
-      render: (text: string, record: AgentDecision) => text || record.agent_name,
+      render: (text: string, record: AgentDecision) => formatAgentName(text || record.agent_name),
     },
     {
       title: '股票代码',
@@ -283,7 +308,7 @@ const HistoryDashboard: React.FC = () => {
       width: 100,
       render: (type: string) => (
         <Tag color={getDecisionTypeColor(type)}>
-          {type?.toUpperCase() || 'UNKNOWN'}
+          {formatDecisionType(type)}
         </Tag>
       ),
     },
@@ -362,7 +387,7 @@ const HistoryDashboard: React.FC = () => {
       width: 100,
       render: (status: string) => (
         <Tag color={getStatusColor(status)}>
-          {status?.toUpperCase() || 'UNKNOWN'}
+          {formatDecisionType(status)}
         </Tag>
       ),
     },
@@ -442,7 +467,7 @@ const HistoryDashboard: React.FC = () => {
       width: 100,
       render: (status: string) => (
         <Tag color={getStatusColor(status)}>
-          {status?.toUpperCase() || 'UNKNOWN'}
+          {formatDecisionType(status)}
         </Tag>
       ),
     },
@@ -675,7 +700,7 @@ const HistoryDashboard: React.FC = () => {
                 <code>{selectedDecision.run_id}</code>
               </Descriptions.Item>
               <Descriptions.Item label="Agent">
-                {selectedDecision.agent_display_name || selectedDecision.agent_name}
+                {formatAgentName(selectedDecision.agent_display_name || selectedDecision.agent_name)}
               </Descriptions.Item>
               <Descriptions.Item label="股票代码">
                 {selectedDecision.ticker}

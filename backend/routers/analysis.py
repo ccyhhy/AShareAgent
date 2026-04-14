@@ -185,6 +185,113 @@ def _build_analysis_stage_progress(run_id: str, task_status: str) -> Dict[str, A
         "total_stage_count": total_stage_count,
     }
 
+def _build_analysis_stage_progress_v2(run_id: str, task_status: str) -> Dict[str, Any]:
+    """Build stage progress with sequential UI semantics.
+
+    If an earlier stage is not completed, later stages are forced to pending for display.
+    """
+    run_agent_states = api_state.get_run_agent_states(run_id)
+    stages: List[Dict[str, Any]] = []
+    current_stage: Optional[Dict[str, Any]] = None
+    total_stage_count = len(ANALYSIS_STAGE_CONFIG)
+
+    for stage in ANALYSIS_STAGE_CONFIG:
+        agent_statuses = [
+            (run_agent_states.get(agent_name) or {}).get("status")
+            for agent_name in stage["agents"]
+        ]
+        agent_statuses = [state for state in agent_statuses if state]
+
+        if task_status == "completed":
+            stage_status = "completed"
+        elif any(state == "error" for state in agent_statuses):
+            stage_status = "error"
+        elif agent_statuses and all(state == "completed" for state in agent_statuses):
+            stage_status = "completed"
+        elif any(state == "running" for state in agent_statuses):
+            stage_status = "running"
+        elif agent_statuses:
+            stage_status = "running"
+        else:
+            stage_status = "pending"
+
+        stages.append(
+            {
+                "key": stage["key"],
+                "title": stage["title"],
+                "description": stage["description"],
+                "status": stage_status,
+                "agents": [
+                    {
+                        "key": agent_name,
+                        "label": AGENT_DISPLAY_NAMES.get(agent_name, agent_name),
+                        "status": (run_agent_states.get(agent_name) or {}).get("status", "pending"),
+                    }
+                    for agent_name in stage["agents"]
+                ],
+            }
+        )
+
+    if task_status != "completed":
+        first_incomplete_index: Optional[int] = None
+        for idx, stage in enumerate(stages):
+            if stage["status"] != "completed":
+                first_incomplete_index = idx
+                break
+
+        if first_incomplete_index is not None:
+            for idx in range(first_incomplete_index + 1, len(stages)):
+                stages[idx]["status"] = "pending"
+                for agent in stages[idx]["agents"]:
+                    agent["status"] = "pending"
+
+    completed_count = 0
+    for stage in stages:
+        if stage["status"] == "completed":
+            completed_count += 1
+        elif current_stage is None:
+            current_stage = stage
+
+    if task_status == "completed":
+        progress_percent = 100
+    else:
+        progress_percent = round((completed_count / total_stage_count) * 100)
+        if current_stage and current_stage["status"] == "running":
+            progress_percent += round(100 / (total_stage_count * 2))
+        progress_percent = min(progress_percent, 99)
+
+    active_agents: List[str] = []
+    if current_stage:
+        active_agents = [
+            agent["label"]
+            for agent in current_stage["agents"]
+            if agent["status"] == "running"
+        ]
+
+    if task_status == "completed":
+        progress_text = "分析已完成，结果已生成。"
+    elif task_status == "failed":
+        failed_stage = current_stage["title"] if current_stage else "执行阶段"
+        progress_text = f"分析失败，停止在“{failed_stage}”。"
+    elif current_stage:
+        progress_text = (
+            f"已完成 {completed_count}/{total_stage_count} 个阶段，"
+            f"当前正在执行“{current_stage['title']}”。"
+        )
+    else:
+        progress_text = "任务已创建，等待开始执行。"
+
+    return {
+        "progress_percent": progress_percent,
+        "progress_text": progress_text,
+        "current_stage": current_stage,
+        "stages": stages,
+        "active_agents": active_agents,
+        "completed_stage_count": completed_count if task_status != "completed" else total_stage_count,
+        "total_stage_count": total_stage_count,
+    }
+
+
 def execute_stock_analysis_with_user(request, run_id: str, user_id: int, db_manager: DatabaseManager):
     """执行股票分析，支持用户关联和数据库记录"""
     try:
@@ -450,7 +557,7 @@ async def get_analysis_status(
         # 获取内存中的任务状态
         task = api_state.get_analysis_task(run_id)
         run_info = api_state.get_run(run_id)
-        stage_progress = _build_analysis_stage_progress(run_id, task_data["status"])
+        stage_progress = _build_analysis_stage_progress_v2(run_id, task_data["status"])
         
         status_data = {
             "task_id": task_data["task_id"],
@@ -672,4 +779,3 @@ async def delete_analysis_task(
             message=f"删除任务失败: {str(e)}",
             data=False
         )
-

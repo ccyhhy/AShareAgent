@@ -8,6 +8,9 @@ packages = [
     { include = "src" }
 ]
 [tool.poetry.dependencies]
+# LangChain/Pydantic V1 do not support Python 3.14+.
+# If running on 3.14, expect UserWarning about Pydantic V1 incompatibility.
+# The core analysis workflow still functions; warnings are non-fatal.
 python = ">=3.11,<3.14"
 langchain = "0.3.0"
 langchain-openai = "0.2.11"

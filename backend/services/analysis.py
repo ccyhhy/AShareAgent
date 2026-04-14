@@ -374,7 +374,6 @@ def execute_stock_analysis(request: StockAnalysisRequest, run_id: str) -> Dict[s
                 portfolio=portfolio,
                 show_reasoning=request.show_reasoning,
                 num_of_news=request.num_of_news,
-                show_summary=request.show_summary
             )
 
         run_info = api_state.get_run(run_id)

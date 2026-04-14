@@ -164,7 +164,7 @@ const BacktestResult: React.FC<BacktestResultProps> = ({ result }) => {
       <Card className="feature-card backtest-result-hero-card mb-4">
         <div className="section-hero">
           <div>
-            <span className="section-kicker">Backtest Review</span>
+            <span className="section-kicker">回测复盘</span>
             <h3 className="section-title">策略结果复盘</h3>
             <p className="section-description">
               这里集中展示收益表现、风险指标、图形结果和交易明细，适合直接作为实验章节或答辩展示页截图来源。

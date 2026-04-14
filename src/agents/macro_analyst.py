@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from src.tools.openrouter_config import get_chat_completion
 from src.database.data_service import get_data_service
 
-# 璁剧疆鏃ュ織璁板綍
+# 设置日志记录
 logger = setup_logger('macro_analyst_agent')
 
 
@@ -152,7 +152,7 @@ def macro_analyst_agent(state: AgentState):
         return ablation_result
 
     symbol = data["ticker"]
-    logger.info(f"姝ｅ湪杩涜瀹忚鍒嗘瀽: {symbol}")
+    logger.info(f"正在进行宏观分析: {symbol}")
 
     # --- Backtest-safe guard: skip all remote calls in backtest mode ---
     _backtest_mode = os.getenv("ASHAREAGENT_BACKTEST_MODE", "").strip().lower() in {
@@ -185,20 +185,20 @@ def macro_analyst_agent(state: AgentState):
             "metadata": state["metadata"],
         }
 
-    # 鑾峰彇 end_date 骞朵紶閫掔粰 get_stock_news
+    # 获取 end_date 并传递给 get_stock_news
     end_date = data.get("end_date")  # 浠?run_hedge_fund 浼犻€掓潵鐨?end_date
 
-    # 鑾峰彇澶ч噺鏂伴椈鏁版嵁锛堟渶澶?00鏉★級锛屼紶閫掓纭殑鏃ユ湡鍙傛暟
+    # 获取大量新闻数据（最大100条），传递正确的日期参数
     news_list = get_stock_news(symbol, max_news=100, date=end_date)
 
-    # 杩囨护涓冨ぉ鍓嶇殑鏂伴椈鍜屽け璐ョ殑鎼滅储缁撴灉
+    # 过滤七天前的新闻和失败的搜索结果
     reference_datetime = _resolve_reference_datetime(end_date)
     cutoff_date = reference_datetime - timedelta(days=7)
     recent_news = []
     for news in news_list:
-        # 杩囨护鎺夋悳绱㈠け璐ョ殑鏂伴椈
-        if news.get('title') == '鎼滅储澶辫触' or '鎼滅储澶辫触' in news.get('title', ''):
-            logger.warning(f"杩囨护鎺夋悳绱㈠け璐ョ殑鏂伴椈: {news.get('title', '')}")
+        # 过滤掉搜索失败的新闻
+        if news.get('title') == '搜索失败' or '搜索失败' in news.get('title', ''):
+            logger.warning(f"过滤掉搜索失败的新闻: {news.get('title', '')}")
             continue
             
         # Filter out obviously invalid news items.
@@ -213,19 +213,19 @@ def macro_analyst_agent(state: AgentState):
                 if news_date > cutoff_date:
                     recent_news.append(news)
             except ValueError:
-                # 濡傛灉鏃堕棿鏍煎紡鏃犳硶瑙ｆ瀽锛岄粯璁ゅ寘鍚繖鏉℃柊闂?
+                # 如果时间格式无法解析，默认包含这条新闻
                 recent_news.append(news)
         else:
-            # 濡傛灉娌℃湁publish_time瀛楁锛岄粯璁ゅ寘鍚繖鏉℃柊闂?
+            # 如果没有publish_time字段，默认包含这条新闻
             recent_news.append(news)
 
     logger.info("Retrieved %s news items within the seven-day window", len(recent_news))
 
-    # 濡傛灉娌℃湁鑾峰彇鍒版柊闂伙紝灏濊瘯寮哄埗鍒锋柊鑾峰彇鏂扮殑鏂伴椈鏁版嵁
+    # 如果没有获取到新闻，尝试强制刷新获取新的新闻数据
     if not recent_news:
-        logger.warning(f"鏈幏鍙栧埌 {symbol} 鐨勬渶杩戞湁鏁堟柊闂伙紝灏濊瘯寮哄埗鍒锋柊...")
+        logger.warning(f"未获取到 {symbol} 的最近有效新闻，尝试强制刷新...")
         
-        # 灏濊瘯鐩存帴浣跨敤akshare鑾峰彇鏂伴椈锛岃烦杩囩紦瀛?
+        # 尝试直接使用akshare获取新闻，跳过缓存
         try:
             import akshare as ak
             fresh_news_df = ak.stock_news_em(symbol=symbol)
@@ -234,14 +234,14 @@ def macro_analyst_agent(state: AgentState):
                     fresh_news_list = []
                     for _, row in fresh_news_df.head(10).iterrows():
                         try:
-                            content = row.get("鏂伴椈鍐呭", "") or row.get("鏂伴椈鏍囬", "")
+                            content = row.get("新闻内容", "") or row.get("新闻标题", "")
                             if len(content.strip()) > 10:
                                 fresh_news_item = {
-                                    "title": row.get("鏂伴椈鏍囬", "").strip(),
+                                    "title": row.get("新闻标题", "").strip(),
                                     "content": content.strip(),
-                                    "publish_time": str(row.get("鍙戝竷鏃堕棿", "")),
-                                    "source": row.get("鏂囩珷鏉ユ簮", "").strip(),
-                                    "url": row.get("鏂伴椈閾炬帴", "").strip(),
+                                    "publish_time": str(row.get("发布时间", "")),
+                                    "source": row.get("文章来源", "").strip(),
+                                    "url": row.get("新闻链接", "").strip(),
                                     "keyword": symbol
                                 }
                                 fresh_news_list.append(fresh_news_item)
@@ -255,11 +255,11 @@ def macro_analyst_agent(state: AgentState):
                         )
                         recent_news = fresh_news_list
         except Exception as e:
-            logger.error(f"寮哄埗鍒锋柊鏂伴椈澶辫触: {e}")
+            logger.error(f"强制刷新新闻失败: {e}")
     
-    # 濡傛灉浠嶇劧娌℃湁鑾峰彇鍒版柊闂伙紝杩斿洖榛樿缁撴灉
+    # 如果仍然没有获取到新闻，返回默认结果
     if not recent_news:
-        logger.warning(f"鏈€缁堟湭鑾峰彇鍒?{symbol} 鐨勬渶杩戞柊闂伙紝鏃犳硶杩涜瀹忚鍒嗘瀽")
+        logger.warning(f"最终未获取到 {symbol} 的最近新闻，无法进行宏观分析")
         message_content = {
             "macro_environment": "neutral",
             "impact_on_stock": "neutral",
@@ -273,23 +273,23 @@ def macro_analyst_agent(state: AgentState):
             ),
         }
     else:
-        # 鑾峰彇瀹忚鍒嗘瀽缁撴灉
+        # 获取宏观分析结果
         macro_analysis = get_macro_news_analysis(recent_news)
         message_content = macro_analysis
 
     message_content = _normalize_macro_message(message_content)
 
-    # 濡傛灉闇€瑕佹樉绀烘帹鐞嗚繃绋?
+    # 如果需要显示推理过程
     if show_reasoning:
         show_agent_reasoning(message_content, "Macro Analysis Agent")
     
-    # 濮嬬粓淇濆瓨鎺ㄧ悊淇℃伅鍒癿etadata渚汚PI浣跨敤
+    # 始终保存推理信息到metadata供API使用
     updated_data = dict(data)
     agent_outputs = _ensure_agent_outputs(updated_data)
     agent_outputs["macro_analyst"] = message_content
     state["metadata"]["agent_reasoning"] = message_content
 
-    # 鍒涘缓娑堟伅
+    # 创建消息
     message = HumanMessage(
         content=json.dumps(message_content, ensure_ascii=False),
         name="macro_analyst_agent",
@@ -310,13 +310,13 @@ def macro_analyst_agent(state: AgentState):
 
 
 def get_macro_news_analysis(news_list: list) -> dict:
-    """鍒嗘瀽瀹忚缁忔祹鏂伴椈瀵硅偂绁ㄧ殑褰卞搷
+    """分析宏观经济新闻对股票的影响
 
     Args:
-        news_list (list): 鏂伴椈鍒楄〃
+        news_list (list): 新闻列表
 
     Returns:
-        dict: 瀹忚鍒嗘瀽缁撴灉锛屽寘鍚幆澧冭瘎浼般€佸鑲＄エ鐨勫奖鍝嶃€佸叧閿洜绱犲拰璇︾粏鎺ㄧ悊
+        dict: 宏观分析结果，包含环境评估、对股票的影响、关键因素和详细推理
     """
     if not news_list:
         return {
@@ -326,16 +326,16 @@ def get_macro_news_analysis(news_list: list) -> dict:
             "reasoning": "可用新闻样本不足，无法完成可靠的宏观分析。",
         }
 
-    # 鑾峰彇鏁版嵁鏈嶅姟
+    # 获取数据服务
     data_service = get_data_service()
     
-    # 鐢熸垚鏂伴椈鍐呭鐨勫敮涓€鏍囪瘑
+    # 生成新闻内容的唯一标识
     news_key = "|".join([
         f"{news['title']}|{news.get('publish_time', '')}"
-        for news in news_list[:20]  # 浣跨敤鍓?0鏉℃柊闂讳綔涓烘爣璇?
+        for news in news_list[:20]  # 使用前20条新闻作为标识
     ])
 
-    # 妫€鏌ユ暟鎹簱缂撳瓨
+    # 检查数据库缓存
     cached_analysis = data_service.get_macro_analysis_from_cache(news_key)
     if cached_analysis:
         logger.info("Using cached macro analysis from the database")

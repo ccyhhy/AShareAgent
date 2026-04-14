@@ -71,8 +71,11 @@ def test_get_financial_metrics_writes_snapshot_after_remote_fetch(tmp_path: Path
     ]
 
     with patch.dict("os.environ", {"ASHAREAGENT_SNAPSHOT_DIR": str(tmp_path)}), patch(
-        "src.tools.api._get_financial_metrics_akshare",
+        "src.tools.api._get_financial_metrics_tencent",
         return_value=remote_metrics,
+    ), patch(
+        "src.tools.api._get_financial_fundamentals_sina",
+        side_effect=Exception("sina supplement unavailable"),
     ):
         result = get_financial_metrics("600519")
 
@@ -83,7 +86,7 @@ def test_get_financial_metrics_writes_snapshot_after_remote_fetch(tmp_path: Path
     assert snapshot_payload["data"][0]["return_on_equity"] == 0.18
     assert result[0]["cache_status"] == "remote_live"
     assert result[0]["is_snapshot"] is False
-    assert result[0]["data_source"] == "akshare"
+    assert result[0]["data_source"] == "tencent"
 
 
 def test_get_financial_statements_falls_back_to_stale_snapshot_when_remote_fetch_fails(tmp_path: Path):
@@ -112,3 +115,31 @@ def test_get_financial_statements_falls_back_to_stale_snapshot_when_remote_fetch
     assert result[0]["cache_status"] == "stale_snapshot"
     assert result[0]["is_snapshot"] is True
     assert result[0]["data_source"] == "snapshot_seed"
+
+
+def test_get_financial_statements_derives_from_offline_market_payload_when_statements_missing(tmp_path: Path):
+    offline_payload = {
+        "600519": {
+            "market_data": {
+                "netIncomeToCommon": 90_000_000_000,
+                "totalRevenue": 180_000_000_000,
+                "freeCashflow": 51_000_000_000,
+                "ebitda": 120_000_000_000,
+            },
+            "metrics": {},
+        }
+    }
+    offline_path = tmp_path / "offline_financials_600519.json"
+    offline_path.write_text(json.dumps(offline_payload, ensure_ascii=False), encoding="utf-8")
+
+    with patch.dict("os.environ", {"ASHAREAGENT_SNAPSHOT_DIR": str(tmp_path)}), patch(
+        "src.tools.api._build_offline_financials_path",
+        return_value=offline_path,
+    ), patch("src.tools.api.ak.stock_financial_report_sina", side_effect=Exception("network down")):
+        result = get_financial_statements("600519")
+
+    assert result[0]["net_income"] == 90_000_000_000
+    assert result[0]["operating_revenue"] == 180_000_000_000
+    assert result[0]["free_cash_flow"] == 51_000_000_000
+    assert result[0]["cache_status"] == "offline_derived"
+    assert result[0]["data_source"] == "offline_json_derived"

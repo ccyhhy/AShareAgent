@@ -178,7 +178,7 @@ const LoginForm: React.FC<LoginFormProps> = ({ onLoginSuccess }) => {
         title={
           <div className="login-brand">
             <h2 className="login-brand-title">A 股价值投资分析系统</h2>
-            <p className="login-brand-subtitle">Heterogeneous Multi-Agent Intelligence</p>
+            <p className="login-brand-subtitle">异构多智能体协作</p>
           </div>
         }
       >

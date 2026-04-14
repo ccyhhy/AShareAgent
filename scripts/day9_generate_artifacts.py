@@ -171,7 +171,6 @@ def run_ablation_backtests(start_date: str, end_date: str) -> list[dict[str, Any
         agent_fn = partial(
             run_hedge_fund,
             show_reasoning=False,
-            show_summary=False,
             ablation_config=cfg,
         )
         backtester = IntelligentBacktester(

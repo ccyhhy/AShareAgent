@@ -212,7 +212,7 @@ const SystemMonitor: React.FC = () => {
       <Card className="feature-card monitor-hero-card mb-4">
         <div className="section-hero">
           <div>
-            <span className="section-kicker">Operations Deck</span>
+            <span className="section-kicker">运维中心</span>
             <h3 className="section-title">系统运维与运行健康</h3>
             <p className="section-description">
               这里负责呈现平台健康度、资源使用情况和日志观测结果。整体视觉和分析页统一，方便你后续做系统架构与运维章节的展示。

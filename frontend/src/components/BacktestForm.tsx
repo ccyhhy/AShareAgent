@@ -96,7 +96,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
       <Card className="feature-card backtest-hero-card mb-4">
         <div className="section-hero">
           <div>
-            <span className="section-kicker">Strategy Lab</span>
+            <span className="section-kicker">策略实验室</span>
             <h3 className="section-title">多智能体策略回测实验台</h3>
             <p className="section-description">
               用统一协议观察不同 Agent 组合在不同时间区间、交易成本与执行频率下的收益与风险表现。
@@ -196,7 +196,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
           <Card className="inner-panel-card backtest-parameter-card" bordered={false}>
             <div className="inner-panel-head">
               <div>
-                <span className="section-kicker">Baseline Setup</span>
+                <span className="section-kicker">基准设置</span>
                 <h4 className="inner-panel-title">基础实验参数</h4>
               </div>
               <Text type="secondary">默认配置适合快速跑通回测</Text>
@@ -288,7 +288,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                         <Card className="inner-panel-card" bordered={false}>
                           <div className="inner-panel-head">
                             <div>
-                              <span className="section-kicker">Trading Cost</span>
+                              <span className="section-kicker">交易成本</span>
                               <h4 className="inner-panel-title">交易成本假设</h4>
                             </div>
                             <Text type="secondary">用于成本敏感性实验</Text>
@@ -331,7 +331,7 @@ const BacktestForm: React.FC<BacktestFormProps> = ({ onBacktestStart }) => {
                         <Card className="inner-panel-card" bordered={false}>
                           <div className="inner-panel-head">
                             <div>
-                              <span className="section-kicker">Agent Frequency</span>
+                              <span className="section-kicker">智能体频率</span>
                               <h4 className="inner-panel-title">异构 Agent 执行频率</h4>
                             </div>
                             <Text type="secondary">用于控制不同分析模块的触发节奏</Text>

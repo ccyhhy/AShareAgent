@@ -50,11 +50,11 @@ class StockAnalysisRequest(BaseModel):
         example=True
     )
     num_of_news: int = Field(
-        5,
+        20,
         description="用于情感分析的新闻文章数量（1-100）",
         ge=1,
         le=100,
-        example=5
+        example=20
     )
     initial_capital: float = Field(
         100000.0,
@@ -77,11 +77,6 @@ class StockAnalysisRequest(BaseModel):
         None,
         description="分析结束日期 (YYYY-MM-DD)，为空则使用默认值（昨天）",
         example="2024-12-31"
-    )
-    show_summary: bool = Field(
-        False,
-        description="是否显示详细摘要报告",
-        example=False
     )
 
     class Config:
@@ -186,11 +181,11 @@ class BacktestRequest(BaseModel):
         example=100000.0
     )
     num_of_news: int = Field(
-        5,
+        20,
         description="用于情感分析的新闻文章数量（1-100）",
         ge=1,
         le=100,
-        example=5
+        example=20
     )
     agent_frequencies: Optional[Dict[str, str]] = Field(
         None,

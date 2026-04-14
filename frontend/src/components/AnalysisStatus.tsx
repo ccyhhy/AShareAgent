@@ -86,6 +86,18 @@ const formatDecisionLabel = (value: unknown): string => {
   return '建议持有';
 };
 
+
+const formatAgentName = (name: string) => {
+  const AGENT_LABELS: Record<string, string> = {
+    market_data: '数据层', technicals: '相对估值', fundamentals: '基本面',
+    sentiment: '情绪面', valuation: 'DCF 估值', macro_news_agent: '宏观新闻',
+    researcher_bull: '多头研究员', researcher_bear: '空头研究员', debate_room: '多空辩论',
+    risk_manager: '风险管理', macro_analyst: '宏观分析师', portfolio_manager: '组合经理',
+    policy_impact: '政策影响', liquidity: '流动性评估',
+  };
+  return AGENT_LABELS[name] || name;
+};
+
 const formatStageBadge = (status: string): string => {
   if (status === 'completed') {
     return '已完成';
@@ -385,7 +397,7 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete, onOp
                     <div className="analysis-stage-agents">
                       {stage.agents.map((agent) => (
                         <span className={`analysis-stage-agent analysis-stage-agent-${agent.status}`} key={agent.key}>
-                          {agent.label}
+                          {formatAgentName(agent.label)}
                         </span>
                       ))}
                     </div>
@@ -464,13 +476,30 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete, onOp
                     <div className="agent-node-card" key={`${item.agent_name}-${item.agent_type || 'agent'}`}>
                       <div className="agent-node-head">
                         <div>
-                          <h4 className="agent-node-name">{item.agent_name}</h4>
+                          <h4 className="agent-node-name">
+                            {{
+                              market_data: '数据层',
+                              technicals: '相对估值',
+                              fundamentals: '基本面',
+                              sentiment: '情绪面',
+                              valuation: 'DCF 估值',
+                              macro_news_agent: '宏观新闻',
+                              researcher_bull: '多头研究员',
+                              researcher_bear: '空头研究员',
+                              debate_room: '多空辩论',
+                              risk_manager: '风险管理',
+                              macro_analyst: '宏观分析师',
+                              portfolio_manager: '组合经理',
+                              policy_impact: '政策影响',
+                              liquidity: '流动性评估',
+                            }[item.agent_name] || item.agent_name}
+                          </h4>
                           <span className={`hetero-type-pill hetero-type-pill--${typeMeta.tone}`}>
                             {typeMeta.label}
                           </span>
                         </div>
                         <span className={`agent-signal-badge agent-signal-${signal}`}>
-                          {item.signal || signal}
+                          {formatDecisionLabel(item.signal || signal).replace('建议', '') || (item.signal || signal)}
                         </span>
                       </div>
                       <p className="agent-node-summary">

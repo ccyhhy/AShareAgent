@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 import json
 import numpy as np
 import requests
+import re
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 import time
@@ -35,12 +36,13 @@ warnings.filterwarnings('ignore')
 DATA_SOURCES = {
     'eastmoney': {'priority': 1, 'timeout': 45, 'retries': 3, 'rate_limit': 0.5},  # 每2秒一次
     'akshare': {'priority': 2, 'timeout': 60, 'retries': 2, 'rate_limit': 1},     # 每秒一次
+    'tencent': {'priority': 3, 'timeout': 30, 'retries': 2, 'rate_limit': 0.5},   # 每2秒一次
     'yfinance': {'priority': 3, 'timeout': 30, 'retries': 2, 'rate_limit': 1},    # 每秒一次
 }
 
 DEFAULT_LOCAL_CSV_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 
-REMOTE_PROVIDER_HINTS = {"remote", "remote_api", "akshare", "yfinance", "eastmoney"}
+REMOTE_PROVIDER_HINTS = {"remote", "remote_api", "akshare", "yfinance", "eastmoney", "tencent"}
 
 # 扩展数据集TTL配置
 DATASET_SNAPSHOT_TTLS = {
@@ -114,7 +116,7 @@ def convert_percentage(value: Union[float, str, None]) -> Optional[float]:
         else:
             # 小值可能已经是小数格式，直接返回
             return float_val
-    except:
+    except (ValueError, TypeError, OverflowError, AttributeError):
         return None
 
 def get_stock_code_for_yfinance(symbol: str) -> str:
@@ -243,6 +245,125 @@ def _calculate_rsi(prices, window=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
+
+def _rename_remote_price_columns(df: pd.DataFrame) -> pd.DataFrame:
+    return df.rename(
+        columns={
+            "日期": "date",
+            "开盘": "open",
+            "最高": "high",
+            "最低": "low",
+            "收盘": "close",
+            "成交量": "volume",
+            "date": "date",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume",
+        }
+    )
+
+
+def _get_tencent_symbol(symbol: str) -> str:
+    normalized = _normalize_a_share_symbol(symbol)
+    if normalized.startswith(("60", "68", "90")):
+        return f"sh{normalized}"
+    return f"sz{normalized}"
+
+
+def _parse_tencent_quote(text: str) -> list[str]:
+    match = re.search(r'="(.*)";?$', text.strip())
+    if not match:
+        raise ValueError("Unexpected Tencent quote response format")
+    payload = match.group(1)
+    parts = payload.split("~")
+    if len(parts) < 47:
+        raise ValueError(f"Incomplete Tencent quote payload: len={len(parts)}")
+    return parts
+
+
+def _extract_tencent_quote_metrics(symbol: str) -> Dict[str, Any]:
+    tencent_symbol = _get_tencent_symbol(symbol)
+    url = f"https://qt.gtimg.cn/q={tencent_symbol}"
+    response = requests.get(
+        url,
+        timeout=DATA_SOURCES["tencent"]["timeout"],
+        headers={
+            "Referer": "https://gu.qq.com",
+            "User-Agent": "Mozilla/5.0 (compatible; AShareAgent/1.0)",
+            "Accept": "text/plain,*/*",
+        },
+    )
+    response.raise_for_status()
+    parts = _parse_tencent_quote(response.text)
+
+    current_price = safe_float(parts[3])
+    previous_close = safe_float(parts[4])
+    open_price = safe_float(parts[5])
+    volume_lot = safe_float(parts[6], 0) or 0
+    volume_shares = volume_lot * 100
+    intraday_high = safe_float(parts[33])
+    intraday_low = safe_float(parts[34])
+    pe_ratio = safe_float(parts[39])
+    pb_ratio = safe_float(parts[46])
+    market_cap_yi = safe_float(parts[44])
+    market_cap = market_cap_yi * 1e8 if market_cap_yi is not None else None
+
+    quote_time = parts[30] if len(parts) > 30 else ""
+    price_as_of = None
+    if isinstance(quote_time, str) and len(quote_time) >= 8:
+        price_as_of = f"{quote_time[:4]}-{quote_time[4:6]}-{quote_time[6:8]}"
+
+    return {
+        "current_price": current_price or previous_close,
+        "previous_close": previous_close,
+        "open_price": open_price,
+        "market_cap": market_cap,
+        "volume": volume_shares,
+        "average_volume": volume_shares,
+        "pe_ratio": pe_ratio,
+        "price_to_book": pb_ratio,
+        "price_to_sales": None,
+        "fifty_two_week_high": intraday_high,
+        "fifty_two_week_low": intraday_low,
+        "price_source": "tencent_quote",
+        "price_is_realtime": False,
+        "price_as_of": price_as_of,
+    }
+
+
+def _get_price_history_tencent(symbol: str, start_date: str, end_date: str, adjust: str = "qfq") -> pd.DataFrame:
+    tencent_symbol = _get_tencent_symbol(symbol)
+    normalized_adjust = "hfq" if str(adjust).lower() == "hfq" else "qfq"
+    params = {
+        "param": f"{tencent_symbol},day,{start_date},{end_date},640,{normalized_adjust}",
+    }
+    response = requests.get(
+        "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
+        params=params,
+        timeout=DATA_SOURCES["tencent"]["timeout"],
+        headers={
+            "Referer": "https://gu.qq.com",
+            "User-Agent": "Mozilla/5.0 (compatible; AShareAgent/1.0)",
+            "Accept": "application/json,text/plain,*/*",
+        },
+    )
+    response.raise_for_status()
+    payload = response.json()
+    symbol_payload = payload.get("data", {}).get(tencent_symbol, {})
+    kline_key = "hfqday" if normalized_adjust == "hfq" else "qfqday"
+    rows = symbol_payload.get(kline_key, [])
+    if not rows:
+        raise Exception("Tencent kline returned empty dataset")
+
+    df = pd.DataFrame(rows, columns=["date", "open", "close", "high", "low", "volume"])
+    for column in ["open", "close", "high", "low", "volume"]:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    return df.dropna(subset=["date", "close"]).reset_index(drop=True)
+
+
 def get_price_history(
     symbol: str,
     start_date: str = None,
@@ -284,12 +405,20 @@ def get_price_history(
         return pd.DataFrame()
 
     # 尝试多数据源获取
-    try:
-        if not end_date:
-            end_date = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
-        if not start_date:
-            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+    if not end_date:
+        end_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    if not start_date:
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
+    try:
+        tencent_df = _get_price_history_tencent(symbol, start_date, end_date, adjust=adjust)
+        if tencent_df is not None and not tencent_df.empty:
+            logger.info(f"[DATA_SOURCE] remote_api(tencent_kline) symbol={symbol}")
+            return _normalize_local_price_df(tencent_df)
+    except Exception as exc:
+        logger.warning(f"Tencent history unavailable for {symbol}: {exc}")
+
+    try:
         remote_df = ak.stock_zh_a_hist(
             symbol=symbol,
             period="daily",
@@ -297,32 +426,19 @@ def get_price_history(
             end_date=end_date.replace("-", ""),
             adjust=adjust,
         )
-
         if remote_df is not None and not remote_df.empty:
-            remote_df = remote_df.rename(
-                columns={
-                    "日期": "date",
-                    "开盘": "open",
-                    "最高": "high",
-                    "最低": "low",
-                    "收盘": "close",
-                    "成交量": "volume",
-                    "鏃ユ湡": "date",
-                    "寮€鐩?": "open",
-                    "鏈€楂?": "high",
-                    "鏈€浣?": "low",
-                    "鏀剁洏": "close",
-                    "鎴愪氦閲?": "volume",
-                }
-            )
+            remote_df = _rename_remote_price_columns(remote_df)
             logger.info(f"[DATA_SOURCE] remote_api(akshare_hist) symbol={symbol}")
             return _normalize_local_price_df(remote_df)
+    except Exception as exc:
+        logger.warning(f"AkShare history unavailable for {symbol}: {exc}")
 
+    try:
         yf_symbol = get_stock_code_for_yfinance(symbol)
         logger.info(f"Fetching data from yfinance for {yf_symbol}")
         data = yf.Ticker(yf_symbol).history(start=start_date, end=end_date)
 
-        if data.empty:
+        if data is None or data.empty:
             logger.warning(f"No data returned from yfinance for {yf_symbol}")
             return pd.DataFrame()
 
@@ -330,20 +446,19 @@ def get_price_history(
         data.columns = data.columns.str.lower()
         data = data.rename(
             columns={
-                'date': 'date',
-                'open': 'open',
-                'high': 'high',
-                'low': 'low',
-                'close': 'close',
-                'volume': 'volume',
+                "date": "date",
+                "open": "open",
+                "high": "high",
+                "low": "low",
+                "close": "close",
+                "volume": "volume",
             }
         )
-        data['date'] = pd.to_datetime(data['date'])
-
+        data["date"] = pd.to_datetime(data["date"])
         logger.info(f"[DATA_SOURCE] remote_api(yfinance) symbol={symbol}")
         return _normalize_local_price_df(data)
-    except Exception as e:
-        logger.error(f"Error fetching data from yfinance: {e}")
+    except Exception as exc:
+        logger.error(f"Error fetching data from yfinance: {exc}")
         return pd.DataFrame()
 
 
@@ -396,9 +511,13 @@ def _strip_snapshot_metadata(payload: Any) -> Any:
 def _extract_stock_row(df: pd.DataFrame, symbol: str) -> Optional[pd.Series]:
     if df is None or df.empty:
         return None
+    normalized_target = _normalize_a_share_symbol(symbol)
+    if not normalized_target:
+        return None
     for code_column in ("代码", "证券代码", "symbol"):
         if code_column in df.columns:
-            matched = df[df[code_column].astype(str).str.strip() == symbol]
+            normalized_codes = df[code_column].map(_normalize_a_share_symbol)
+            matched = df[normalized_codes == normalized_target]
             if not matched.empty:
                 return matched.iloc[0]
     return None
@@ -416,18 +535,24 @@ def _extract_row_value(row: Optional[pd.Series], *keys: str) -> Any:
 
 
 def _get_financial_metrics_akshare(symbol: str) -> List[Dict[str, Any]]:
-    """Fetch financial metrics from AkShare with EM -> spot fallback."""
+    """Fetch financial metrics from AkShare with spot -> EM fallback."""
     logger.info("Fetching AkShare financial metrics...")
 
     quotes_df = None
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            quotes_df = executor.submit(ak.stock_zh_a_spot_em).result(timeout=15)
-    except (Exception, ConcurrentTimeoutError) as exc:
-        logger.warning(f"AkShare spot_em unavailable for {symbol}: {exc}")
+        quotes_df = ak.stock_zh_a_spot()
+    except Exception as exc:
+        logger.warning(f"AkShare spot unavailable for {symbol}: {exc}")
 
     if quotes_df is None or quotes_df.empty:
-        quotes_df = ak.stock_zh_a_spot()
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                quotes_df = executor.submit(ak.stock_zh_a_spot_em).result(timeout=15)
+        except (Exception, ConcurrentTimeoutError) as exc:
+            logger.warning(f"AkShare spot_em unavailable for {symbol}: {exc}")
+
+    if quotes_df is None or quotes_df.empty:
+        raise Exception("No spot quote data found from akshare")
 
     stock_row = _extract_stock_row(quotes_df, symbol)
     if stock_row is None:
@@ -487,6 +612,75 @@ def _get_financial_metrics_eastmoney(symbol: str) -> List[Dict[str, Any]]:
     }]
 
 
+def _get_financial_metrics_tencent(symbol: str) -> List[Dict[str, Any]]:
+    quote_metrics = _extract_tencent_quote_metrics(symbol)
+    if not quote_metrics:
+        raise Exception(f"No Tencent data for {symbol}")
+    return [{
+        "pe_ratio": quote_metrics.get("pe_ratio"),
+        "price_to_book": quote_metrics.get("price_to_book"),
+        "price_to_sales": quote_metrics.get("price_to_sales"),
+        "market_cap": quote_metrics.get("market_cap"),
+        "current_price": quote_metrics.get("current_price"),
+    }]
+
+
+def _get_financial_fundamentals_sina(symbol: str) -> Dict[str, Any]:
+    normalized = _normalize_a_share_symbol(symbol)
+    if not normalized:
+        raise Exception(f"Invalid symbol for sina fundamentals: {symbol}")
+
+    current_year = datetime.now().year
+    financial_data = None
+    for year in range(current_year, current_year - 3, -1):
+        try:
+            candidate = ak.stock_financial_analysis_indicator(symbol=normalized, start_year=str(year))
+            if candidate is not None and not candidate.empty:
+                financial_data = candidate
+                break
+        except Exception as exc:
+            logger.warning(f"Sina financial indicator fetch failed for {symbol} ({year}): {exc}")
+
+    if financial_data is None or financial_data.empty:
+        raise Exception(f"No sina financial indicators available for {symbol}")
+
+    latest_financial = financial_data.iloc[0]
+    return {
+        "return_on_equity": convert_percentage(_extract_row_value(latest_financial, "净资产收益率(%)")),
+        "net_margin": convert_percentage(_extract_row_value(latest_financial, "销售净利率(%)")),
+        "operating_margin": convert_percentage(_extract_row_value(latest_financial, "营业利润率(%)")),
+        "revenue_growth": convert_percentage(_extract_row_value(latest_financial, "主营业务收入增长率(%)")),
+        "earnings_growth": convert_percentage(_extract_row_value(latest_financial, "净利润增长率(%)")),
+        "book_value_growth": convert_percentage(_extract_row_value(latest_financial, "净资产增长率(%)")),
+        "current_ratio": safe_float(_extract_row_value(latest_financial, "流动比率")),
+        "debt_to_equity": convert_percentage(_extract_row_value(latest_financial, "资产负债率(%)")),
+        "free_cash_flow_per_share": safe_float(_extract_row_value(latest_financial, "每股经营性现金流(元)")),
+        "earnings_per_share": safe_float(_extract_row_value(latest_financial, "加权每股收益(元)")),
+    }
+
+
+def _is_missing_metric_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, float) and (np.isnan(value) or np.isinf(value)):
+        return True
+    if isinstance(value, (int, float)) and value == 0:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    return False
+
+
+def _merge_metric_rows(primary_row: Dict[str, Any], supplement_row: Dict[str, Any]) -> Dict[str, Any]:
+    merged = dict(primary_row)
+    for key, value in supplement_row.items():
+        if value is None:
+            continue
+        if key not in merged or _is_missing_metric_value(merged.get(key)):
+            merged[key] = value
+    return merged
+
+
 def get_financial_metrics(symbol: str) -> List[Dict[str, Any]]:
     """Get financial metrics with snapshot-first fallback."""
     logger.info(f"Getting financial indicators for {symbol} with enhanced validation...")
@@ -503,24 +697,68 @@ def get_financial_metrics(symbol: str) -> List[Dict[str, Any]]:
                 return snapshot_hit
             logger.warning(f"Snapshot data quality issue: {quality_msg}")
 
-    for source, fetcher in (
-        ("akshare", _get_financial_metrics_akshare),
-        ("eastmoney", _get_financial_metrics_eastmoney),
-    ):
+    base_row: Dict[str, Any] | None = None
+    base_source = ""
+
+    try:
+        tencent_result = _get_financial_metrics_tencent(symbol)
+        if tencent_result and tencent_result != [{}]:
+            base_row = dict(tencent_result[0])
+            base_source = "tencent"
+    except Exception as exc:
+        logger.error(f"Error fetching financial metrics from tencent: {exc}")
+
+    if base_row is None:
         try:
-            result = fetcher(symbol)
-            if result and result != [{}]:
-                _save_dataset_snapshot("financial_metrics", symbol, result, source=source)
-                return _attach_snapshot_metadata(
-                    result,
-                    data_source=source,
-                    cache_status="remote_live",
-                    fetched_at=datetime.now().isoformat(),
-                    is_snapshot=False,
-                    ttl_hours=DATASET_SNAPSHOT_TTLS["financial_metrics"],
-                )
+            akshare_result = _get_financial_metrics_akshare(symbol)
+            if akshare_result and akshare_result != [{}]:
+                base_row = dict(akshare_result[0])
+                base_source = "akshare"
         except Exception as exc:
-            logger.error(f"Error fetching financial metrics from {source}: {exc}")
+            logger.error(f"Error fetching financial metrics from akshare: {exc}")
+
+    supplemented = False
+    if base_row is not None:
+        try:
+            sina_fundamentals = _get_financial_fundamentals_sina(symbol)
+            merged_row = _merge_metric_rows(base_row, sina_fundamentals)
+            supplemented = any(
+                not _is_missing_metric_value(merged_row.get(key))
+                and _is_missing_metric_value(base_row.get(key))
+                for key in (
+                    "return_on_equity",
+                    "net_margin",
+                    "revenue_growth",
+                    "earnings_growth",
+                    "operating_margin",
+                )
+            )
+            base_row = merged_row
+        except Exception as exc:
+            logger.warning(f"Sina fundamentals supplement unavailable for {symbol}: {exc}")
+
+    if base_row is None:
+        try:
+            sina_fundamentals = _get_financial_fundamentals_sina(symbol)
+            base_row = dict(sina_fundamentals)
+            base_source = "sina_finance"
+        except Exception as exc:
+            logger.error(f"Error fetching financial metrics from sina_finance: {exc}")
+
+    if base_row is not None:
+        source_label = base_source
+        if base_source == "tencent" and supplemented:
+            source_label = "tencent+sina_finance"
+        result = [base_row]
+        _save_dataset_snapshot("financial_metrics", symbol, result, source=source_label)
+        return _attach_snapshot_metadata(
+            result,
+            data_source=source_label,
+            cache_status="remote_live",
+            fetched_at=datetime.now().isoformat(),
+            is_snapshot=False,
+            ttl_hours=DATASET_SNAPSHOT_TTLS["financial_metrics"],
+        )
 
     stale_snapshot = _load_dataset_snapshot("financial_metrics", symbol, allow_stale=True)
     if stale_snapshot:
@@ -532,10 +770,11 @@ def get_financial_metrics(symbol: str) -> List[Dict[str, Any]]:
         if offline_path.exists():
             with offline_path.open("r", encoding="utf-8") as f:
                 offline_data = json.load(f)
-                if symbol in offline_data:
+                offline_payload = _resolve_offline_symbol_payload(offline_data, symbol)
+                if offline_payload and isinstance(offline_payload.get("metrics"), dict):
                     logger.info(f"Using OFFLINE CACHE for financial metrics ({symbol})")
                     return _attach_snapshot_metadata(
-                        [offline_data[symbol]["metrics"]],
+                        [offline_payload["metrics"]],
                         data_source="offline_json",
                         cache_status="offline_fallback",
                         fetched_at=datetime.now().isoformat(),
@@ -629,10 +868,101 @@ def _default_financial_statement_item() -> Dict[str, Any]:
     }
 
 
+def _normalize_a_share_symbol(symbol: Any) -> str:
+    raw = str(symbol or "").strip().upper()
+    if not raw:
+        return ""
+    if "." in raw:
+        raw = raw.split(".", 1)[0]
+    if raw.startswith(("SH", "SZ", "BJ")) and raw[2:].isdigit():
+        raw = raw[2:]
+    if raw.isdigit():
+        return raw.zfill(6)
+    return raw
+
+
 def _get_sina_prefixed_symbol(symbol: str) -> str:
-    if symbol.startswith(("60", "68", "90")):
-        return f"sh{symbol}"
-    return f"sz{symbol}"
+    normalized = _normalize_a_share_symbol(symbol)
+    if normalized.startswith(("60", "68", "90")):
+        return f"sh{normalized}"
+    return f"sz{normalized}"
+
+
+def _resolve_offline_symbol_payload(offline_data: Dict[str, Any], symbol: str) -> Optional[Dict[str, Any]]:
+    normalized_symbol = _normalize_a_share_symbol(symbol)
+    candidate_keys = [
+        symbol,
+        normalized_symbol,
+        f"{normalized_symbol}.SH",
+        f"{normalized_symbol}.SZ",
+        f"{normalized_symbol}.SS",
+    ]
+    seen: set[str] = set()
+    for key in candidate_keys:
+        if key and key not in seen:
+            seen.add(key)
+            payload = offline_data.get(key)
+            if isinstance(payload, dict):
+                return payload
+
+    for key, payload in offline_data.items():
+        if not isinstance(payload, dict):
+            continue
+        if _normalize_a_share_symbol(key) == normalized_symbol:
+            return payload
+    return None
+
+
+def _derive_financial_statements_from_offline_payload(payload: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    if not isinstance(payload, dict):
+        return None
+    statements = payload.get("statements")
+    if isinstance(statements, list) and statements:
+        return statements
+
+    market_data = payload.get("market_data") if isinstance(payload.get("market_data"), dict) else {}
+    metrics = payload.get("metrics") if isinstance(payload.get("metrics"), dict) else {}
+
+    net_income = safe_float(
+        market_data.get("netIncomeToCommon"),
+        safe_float(metrics.get("net_income"), 0),
+    ) or 0
+    revenue = safe_float(
+        market_data.get("totalRevenue"),
+        safe_float(metrics.get("revenue"), 0),
+    ) or 0
+    free_cash_flow = safe_float(
+        market_data.get("freeCashflow"),
+        safe_float(metrics.get("free_cash_flow"), 0),
+    ) or 0
+    operating_profit = safe_float(
+        market_data.get("ebitda"),
+        safe_float(metrics.get("operating_profit"), 0),
+    ) or 0
+    total_assets = safe_float(metrics.get("total_assets"), 0) or 0
+    total_liabilities = safe_float(metrics.get("total_liabilities"), 0) or 0
+    stockholders_equity = safe_float(
+        metrics.get("stockholders_equity"),
+        safe_float(market_data.get("bookValue"), 0),
+    ) or 0
+
+    if net_income <= 0 and revenue <= 0 and free_cash_flow <= 0:
+        return None
+
+    derived_item = _default_financial_statement_item()
+    derived_item.update(
+        {
+            "net_income": net_income,
+            "revenue": revenue,
+            "operating_revenue": revenue,
+            "operating_profit": operating_profit,
+            "total_assets": total_assets,
+            "total_liabilities": total_liabilities,
+            "stockholders_equity": stockholders_equity,
+            "free_cash_flow": free_cash_flow,
+        }
+    )
+    return [derived_item, derived_item.copy()]
 
 
 def get_financial_statements(symbol: str) -> List[Dict[str, Any]]:
@@ -714,11 +1044,20 @@ def get_financial_statements(symbol: str) -> List[Dict[str, Any]]:
         if offline_path.exists():
             with offline_path.open("r", encoding="utf-8") as f:
                 offline_data = json.load(f)
-                if symbol in offline_data and offline_data[symbol].get("statements"):
+                offline_payload = _resolve_offline_symbol_payload(offline_data, symbol)
+                if not offline_payload:
+                    offline_payload = {}
+                derived_statements = _derive_financial_statements_from_offline_payload(offline_payload)
+                if derived_statements:
+                    cache_status = "offline_fallback"
+                    data_source = "offline_json"
+                    if not offline_payload.get("statements"):
+                        cache_status = "offline_derived"
+                        data_source = "offline_json_derived"
                     return _attach_snapshot_metadata(
-                        offline_data[symbol]["statements"],
-                        data_source="offline_json",
-                        cache_status="offline_fallback",
+                        derived_statements,
+                        data_source=data_source,
+                        cache_status=cache_status,
                         fetched_at=datetime.now().isoformat(),
                         is_snapshot=False,
                         ttl_hours=DATASET_SNAPSHOT_TTLS["financial_statements"],
@@ -843,12 +1182,12 @@ def calculate_comprehensive_financial_metrics(
 
 def _get_market_data_akshare(symbol: str) -> Dict[str, Any]:
     try:
-        realtime_data = ak.stock_zh_a_spot_em()
-        spot_source = "akshare_spot_em"
-    except Exception as exc:
-        logger.warning(f"AkShare EM market data unavailable for {symbol}: {exc}")
         realtime_data = ak.stock_zh_a_spot()
         spot_source = "akshare_spot"
+    except Exception as exc:
+        logger.warning(f"AkShare spot market data unavailable for {symbol}: {exc}")
+        realtime_data = ak.stock_zh_a_spot_em()
+        spot_source = "akshare_spot_em"
 
     if realtime_data is None or realtime_data.empty:
         raise Exception("No market data from akshare")
@@ -870,6 +1209,26 @@ def _get_market_data_akshare(symbol: str) -> Dict[str, Any]:
         "fifty_two_week_low": safe_float(_extract_row_value(stock_row, "52周最低", "52周最低价")),
         "price_source": spot_source,
         "price_is_realtime": False,
+    }
+
+
+def _get_market_data_tencent(symbol: str) -> Dict[str, Any]:
+    quote_metrics = _extract_tencent_quote_metrics(symbol)
+    if not quote_metrics:
+        raise Exception("No market data from tencent")
+    return {
+        "current_price": quote_metrics.get("current_price"),
+        "market_cap": quote_metrics.get("market_cap"),
+        "volume": quote_metrics.get("volume"),
+        "average_volume": quote_metrics.get("average_volume"),
+        "pe_ratio": quote_metrics.get("pe_ratio"),
+        "price_to_book": quote_metrics.get("price_to_book"),
+        "price_to_sales": quote_metrics.get("price_to_sales"),
+        "fifty_two_week_high": quote_metrics.get("fifty_two_week_high"),
+        "fifty_two_week_low": quote_metrics.get("fifty_two_week_low"),
+        "price_source": "tencent_quote",
+        "price_is_realtime": False,
+        "price_as_of": quote_metrics.get("price_as_of"),
     }
 
 
@@ -900,8 +1259,8 @@ def get_market_data(symbol: str) -> Dict[str, Any]:
         return snapshot_hit
 
     for source, fetcher in (
+        ("tencent", _get_market_data_tencent),
         ("akshare", _get_market_data_akshare),
-        ("eastmoney", _get_market_data_eastmoney),
     ):
         try:
             result = fetcher(symbol)
@@ -928,9 +1287,10 @@ def get_market_data(symbol: str) -> Dict[str, Any]:
         if offline_path.exists():
             with offline_path.open("r", encoding="utf-8") as f:
                 offline_data = json.load(f)
-                if symbol in offline_data and offline_data[symbol].get("market_data"):
+                offline_payload = _resolve_offline_symbol_payload(offline_data, symbol)
+                if offline_payload and isinstance(offline_payload.get("market_data"), dict):
                     return _attach_snapshot_metadata(
-                        offline_data[symbol]["market_data"],
+                        offline_payload["market_data"],
                         data_source="offline_json",
                         cache_status="offline_fallback",
                         fetched_at=datetime.now().isoformat(),
@@ -951,7 +1311,8 @@ def get_market_data(symbol: str) -> Dict[str, Any]:
 
 def _build_offline_financials_path(symbol: str) -> Path:
     """构建离线财务数据路径"""
-    return Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "data" / f"offline_financials_{symbol}.json"
+    normalized = _normalize_a_share_symbol(symbol)
+    return Path(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) / "data" / f"offline_financials_{normalized}.json"
 
 def _calculate_ps_ratio(market_cap, revenue):
     """计算市销率"""
@@ -1043,15 +1404,24 @@ def get_eastmoney_data(symbol: str, raw_response: bool = False) -> Optional[Dict
     """使用东方财富API获取实时数据"""
     try:
         # 东方财富实时数据API
-        url = "http://push2.eastmoney.com/api/qt/stock/get"
-        secid = f"1.{symbol}" if symbol.startswith('60') else f"0.{symbol}"
+        normalized_symbol = _normalize_a_share_symbol(symbol)
+        url = "https://push2.eastmoney.com/api/qt/stock/get"
+        secid = f"1.{normalized_symbol}" if normalized_symbol.startswith("60") else f"0.{normalized_symbol}"
         params = {
             'secid': secid,
             # 添加更多财务指标字段: f114(PE动), f115(PE静), f116(总市值), f117(流通市值), f167(PB), f168(PS)
             'fields': 'f43,f57,f58,f162,f173,f170,f46,f60,f44,f45,f47,f48,f49,f50,f51,f52,f114,f115,f116,f117,f167,f168'
         }
 
-        response = requests.get(url, params=params, timeout=DATA_SOURCES['eastmoney']['timeout'])
+        response = requests.get(
+            url,
+            params=params,
+            timeout=DATA_SOURCES['eastmoney']['timeout'],
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; AShareAgent/1.0)",
+                "Accept": "application/json,text/plain,*/*",
+            },
+        )
         response.raise_for_status()
 
         data = response.json()

@@ -40,16 +40,16 @@ const OUTPUT_KEY_ALIASES: Record<string, string> = {
 
 function getDefaultReasoning(agentName: string): string {
   const reasoningMap: Record<string, string> = {
-    technical_analysis: 'Relative valuation is based on PB percentile and current PB level.',
-    relative_valuation_analysis: 'Relative valuation is based on PB percentile and current PB level.',
-    fundamental_analysis: 'Fundamental analysis evaluates company quality and financial health.',
-    sentiment_analysis: 'Sentiment analysis evaluates recent news and market mood.',
-    valuation_analysis: 'Valuation analysis compares market price and intrinsic value signals.',
-    risk_management: 'Risk management evaluates volatility, drawdown, and position limits.',
-    selected_stock_macro_analysis: 'Macro analysis evaluates policy and business-cycle impact.',
+    technical_analysis: '基于 PB 分位数和当前 PB 水平的相对估值。',
+    relative_valuation_analysis: '基于 PB 分位数和当前 PB 水平的相对估值。',
+    fundamental_analysis: '基本面分析评估公司质量与财务健康状况。',
+    sentiment_analysis: '情绪分析评估近期新闻与市场情绪。',
+    valuation_analysis: '估值分析对比市场价格与内在价值信号。',
+    risk_management: '风险管理评估波动率、最大回撤与仓位限制。',
+    selected_stock_macro_analysis: '宏观分析评估政策与经济周期影响。',
   };
 
-  return reasoningMap[agentName] || `${agentName} professional analysis result`;
+  return reasoningMap[agentName] || `${agentName} 专业分析结果`;
 }
 
 function buildAgentOutputsFromSignals(signals: Array<Record<string, any>>): Record<string, any> {

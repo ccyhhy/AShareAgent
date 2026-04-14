@@ -81,7 +81,7 @@ def test_macro_analyst_degrades_gracefully_when_model_output_is_invalid(monkeypa
     assert output["signal"] == "neutral"
     assert output["confidence"] == "55%"
     assert output["key_factors"] == []
-    assert "fallback" in output["reasoning"].lower()
+    assert "回退" in output["reasoning"]
 
 
 def test_macro_analyst_backtest_mode_is_deterministic_and_does_not_call_remote_dependencies(monkeypatch):
@@ -106,9 +106,7 @@ def test_macro_analyst_backtest_mode_is_deterministic_and_does_not_call_remote_d
     assert output["signal"] == "neutral"
     assert output["confidence"] == "50%"
     assert isinstance(output["reasoning"], str)
-    assert output["reasoning"] == (
-        "Backtest mode active. Remote news crawling and LLM calls skipped for reproducibility."
-    )
+    assert "回测模式" in output["reasoning"]
     assert result["data"]["macro_analysis"] == output
 
 

@@ -46,14 +46,6 @@ from backend.dependencies import get_log_storage
 from backend.main import app as fastapi_app
 from src.utils.logging_config import setup_logger
 
-# --- Import Summary Report Generator ---
-try:
-    from src.utils.summary_report import print_summary_report
-    from src.utils.agent_collector import store_final_state, get_enhanced_final_state
-    HAS_SUMMARY_REPORT = True
-except ImportError:
-    HAS_SUMMARY_REPORT = False
-
 # --- Import Structured Terminal Output ---
 try:
     from src.utils.structured_terminal import print_structured_output
@@ -78,16 +70,15 @@ def run_hedge_fund(
     portfolio: dict,
     show_reasoning: bool = False,
     num_of_news: int = 5,
-    show_summary: bool = False,
     ablation_config: dict | None = None,
 ):
-    print(f"--- Starting Workflow Run ID: {run_id} ---")
+    logger.info(f"--- Starting Workflow Run ID: {run_id} ---")
     try:
         from backend.state import api_state
         api_state.current_run_id = run_id
-        print(f"--- API State updated with Run ID: {run_id} ---")
+        logger.info(f"--- API State updated with Run ID: {run_id} ---")
     except Exception as e:
-        print(f"Note: Could not update API state: {str(e)}")
+        logger.warning(f"Note: Could not update API state: {str(e)}")
 
     initial_state = {
         "messages": [],  # 初始消息为空
@@ -101,7 +92,6 @@ def run_hedge_fund(
         "metadata": {
             "show_reasoning": show_reasoning,
             "run_id": run_id,
-            "show_summary": show_summary,
             **({"ablation_config": ablation_config} if ablation_config else {}),
         }
     }
@@ -116,42 +106,30 @@ def run_hedge_fund(
             with ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(run_workflow)
                 try:
-                    print(f"DEBUG: Starting workflow execution with NO timeout")
+                    logger.info(f"Starting workflow execution with NO timeout")
                     final_state = future.result()  # 无超时限制
-                    print(f"--- Finished Workflow Run ID: {run_id} ---")
-                    print(f"DEBUG: HAS_STRUCTURED_OUTPUT={HAS_STRUCTURED_OUTPUT}, show_reasoning={show_reasoning}")
+                    logger.info(f"--- Finished Workflow Run ID: {run_id} ---")
                 except Exception as e:
                     logger.error(f"Workflow execution error for run {run_id}: {str(e)}")
-                    print(f"DEBUG: Workflow failed with error: {str(e)}")
                     raise
 
-            if HAS_SUMMARY_REPORT and show_summary:
-                store_final_state(final_state)
-                enhanced_state = get_enhanced_final_state()
-                print_summary_report(enhanced_state)
-
             if HAS_STRUCTURED_OUTPUT and show_reasoning:
-                print("DEBUG: About to call print_structured_output")
+                logger.info("About to call print_structured_output")
                 print_structured_output(final_state)
-                print("DEBUG: print_structured_output completed")
+                logger.info("print_structured_output completed")
     except ImportError:
         # 使用线程池添加超时控制
         def run_workflow():
             return app.invoke(initial_state)
-        
+
         with ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(run_workflow)
             try:
                 final_state = future.result(timeout=600)  # 10分钟超时
-                print(f"--- Finished Workflow Run ID: {run_id} ---")
+                logger.info(f"--- Finished Workflow Run ID: {run_id} ---")
             except ConcurrentTimeoutError:
                 logger.error(f"Workflow timeout after 600 seconds for run {run_id}")
                 raise TimeoutError("Workflow execution timeout")
-
-        if HAS_SUMMARY_REPORT and show_summary:
-            store_final_state(final_state)
-            enhanced_state = get_enhanced_final_state()
-            print_summary_report(enhanced_state)
 
         if HAS_STRUCTURED_OUTPUT and show_reasoning:
             print_structured_output(final_state)
@@ -248,8 +226,6 @@ if __name__ == "__main__":
                         help='Initial cash amount (default: 100,000)')
     parser.add_argument('--initial-position', type=int,
                         default=0, help='Initial stock position (default: 0)')
-    parser.add_argument('--summary', action='store_true',
-                        help='Show beautiful summary report at the end')
     parser.add_argument(
         "--ablation-profile",
         type=str,
@@ -301,8 +277,7 @@ if __name__ == "__main__":
         portfolio=portfolio,
         show_reasoning=args.show_reasoning,
         num_of_news=args.num_of_news,
-        show_summary=args.summary,
         ablation_config=ablation_config,
     )
-    print("\nFinal Result:")
-    print(result)
+    logger.info("\nFinal Result:")
+    logger.info(result)

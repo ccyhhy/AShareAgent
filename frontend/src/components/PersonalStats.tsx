@@ -119,7 +119,7 @@ const PersonalStats: React.FC = () => {
       <Card className="feature-card personal-stats-hero-card mb-4">
         <div className="section-hero">
           <div>
-            <span className="section-kicker">Personal Performance</span>
+            <span className="section-kicker">个人表现</span>
             <h3 className="section-title">个人统计与使用表现</h3>
             <p className="section-description">
               用统一的高质量面板展示分析次数、回测频率、组合表现和最近活动，适合作为系统用户侧价值的展示窗口。
@@ -199,7 +199,7 @@ const PersonalStats: React.FC = () => {
 
             <div className="stats-range-panel">
               <div className="stats-range-head">
-                <span className="section-kicker">Return Band</span>
+                <span className="section-kicker">收益区间</span>
                 <span>展示近阶段的收益区间与平均水平</span>
               </div>
               <Progress
