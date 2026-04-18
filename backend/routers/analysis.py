@@ -697,7 +697,11 @@ async def get_analysis_result(
                 participating_agents=run_info.agents,
             )
 
-        final_decision = _extract_portfolio_decision(all_agents.get("portfolio_management_agent"))
+        portfolio_agent_data = (
+            all_agents.get("portfolio_management")
+            or all_agents.get("portfolio_management_agent")
+        )
+        final_decision = _extract_portfolio_decision(portfolio_agent_data)
         result_data = _build_analysis_payload(
             ticker=ticker,
             run_id=run_id,

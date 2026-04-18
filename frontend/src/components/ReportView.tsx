@@ -1,23 +1,6 @@
 import React, { useMemo } from 'react';
-import {
-  Alert,
-  Button,
-  Card,
-  Col,
-  Collapse,
-  Divider,
-  Empty,
-  Row,
-  Space,
-  Tag,
-  Typography,
-} from 'antd';
-import {
-  ArrowRightOutlined,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
-  InfoCircleOutlined,
-} from '@ant-design/icons';
+import { Alert, Button, Card, Col, Collapse, Divider, Empty, Row, Space, Tag, Typography } from 'antd';
+import { ArrowRightOutlined, ExclamationCircleOutlined, InfoCircleOutlined } from '@ant-design/icons';
 import { buildReportDashboard } from '../utils/reportView';
 
 const { Paragraph, Text, Title } = Typography;
@@ -29,10 +12,10 @@ interface ReportViewProps {
 
 const toneColor = (tone: 'bullish' | 'bearish' | 'neutral' | 'warning'): string => {
   if (tone === 'bullish') {
-    return 'error';
+    return 'success';
   }
   if (tone === 'bearish') {
-    return 'success';
+    return 'error';
   }
   if (tone === 'warning') {
     return 'warning';
@@ -40,14 +23,17 @@ const toneColor = (tone: 'bullish' | 'bearish' | 'neutral' | 'warning'): string 
   return 'processing';
 };
 
-const toneIcon = (tone: 'bullish' | 'bearish' | 'neutral' | 'warning') => {
+const toneText = (tone: 'bullish' | 'bearish' | 'neutral' | 'warning'): string => {
   if (tone === 'bullish') {
-    return <CheckCircleOutlined />;
+    return '偏多';
   }
   if (tone === 'bearish') {
-    return <ExclamationCircleOutlined />;
+    return '偏空';
   }
-  return <InfoCircleOutlined />;
+  if (tone === 'warning') {
+    return '警示';
+  }
+  return '中性';
 };
 
 const ReportView: React.FC<ReportViewProps> = ({ data, onOpenDcfWorkbench }) => {
@@ -76,34 +62,60 @@ const ReportView: React.FC<ReportViewProps> = ({ data, onOpenDcfWorkbench }) => 
             <Paragraph className="report-decision-reason">{dashboard.heroReason}</Paragraph>
           </div>
           <Space direction="vertical" align="end" size={10}>
-            <Tag color={toneColor(dashboard.actionTone)} icon={toneIcon(dashboard.actionTone)}>
-              {dashboard.dataIntegrityLabel}
-            </Tag>
+            <Tag color={toneColor(dashboard.actionTone)}>{dashboard.dataIntegrityLabel}</Tag>
             <Tag>{dashboard.confidenceText} 置信度</Tag>
           </Space>
         </div>
 
-        <div className="report-hero-metrics">
-          <div className="report-hero-metric">
-            <span>股票代码</span>
-            <strong>{dashboard.ticker}</strong>
-          </div>
-          <div className="report-hero-metric">
-            <span>结论类型</span>
-            <strong>{dashboard.actionLabel}</strong>
-          </div>
-          <div className="report-hero-metric">
-            <span>数据完整度</span>
-            <strong>{dashboard.dataIntegrityLabel}</strong>
-          </div>
-          <div className="report-hero-metric">
-            <span>DCF 说明</span>
-            <strong>{dashboard.dcfHeadline}</strong>
-          </div>
+        <div className="report-fact-grid">
+          {dashboard.decisionFacts.map((fact) => (
+            <div className="report-fact-item" key={fact.label}>
+              <span>{fact.label}</span>
+              <strong>{fact.value}</strong>
+              <p>{fact.hint}</p>
+            </div>
+          ))}
         </div>
       </Card>
 
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+      <Row gutter={[16, 16]}>
+        <Col xs={24} xl={12}>
+          <Card className="report-panel-card" title="关键证据">
+            {dashboard.keyEvidence.length > 0 ? (
+              <ul className="report-bullet-list">
+                {dashboard.keyEvidence.map((item, index) => (
+                  <li key={`evidence-${index}`}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无关键证据" />
+            )}
+          </Card>
+        </Col>
+        <Col xs={24} xl={12}>
+          <Card
+            className="report-panel-card report-limitation-card"
+            title={
+              <Space size={8}>
+                <ExclamationCircleOutlined />
+                结论局限性
+              </Space>
+            }
+          >
+            {dashboard.limitationPoints.length > 0 ? (
+              <ul className="report-bullet-list">
+                {dashboard.limitationPoints.map((item, index) => (
+                  <li key={`limitation-${index}`}>{item}</li>
+                ))}
+              </ul>
+            ) : (
+              <Paragraph className="report-balance-copy">当前未识别到明显局限。</Paragraph>
+            )}
+          </Card>
+        </Col>
+      </Row>
+
+      <Row gutter={[16, 16]}>
         <Col xs={24} xl={8}>
           <Card className="report-panel-card" title="支持理由">
             {dashboard.supportPoints.length > 0 ? (
@@ -137,15 +149,22 @@ const ReportView: React.FC<ReportViewProps> = ({ data, onOpenDcfWorkbench }) => 
         </Col>
       </Row>
 
-      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+      <Row gutter={[16, 16]}>
         <Col xs={24} xl={12}>
           <Card className="report-panel-card" title="风险提示">
             <Paragraph className="report-balance-copy">{dashboard.riskSummary}</Paragraph>
           </Card>
         </Col>
         <Col xs={24} xl={12}>
-          <Card className="report-panel-card" title="数据可靠度">
+          <Card className="report-panel-card" title="数据可靠性">
             <Paragraph className="report-balance-copy">{dashboard.reliabilitySummary}</Paragraph>
+            {dashboard.dataSourceLines.length > 0 && (
+              <ul className="report-bullet-list report-bullet-list-compact">
+                {dashboard.dataSourceLines.map((line, index) => (
+                  <li key={`source-${index}`}>{line}</li>
+                ))}
+              </ul>
+            )}
           </Card>
         </Col>
       </Row>
@@ -164,7 +183,9 @@ const ReportView: React.FC<ReportViewProps> = ({ data, onOpenDcfWorkbench }) => 
                   {module.statusLabel}
                 </Title>
               </div>
-              <Tag color={toneColor(module.tone)}>{module.statusLabel}</Tag>
+              <Tag color={toneColor(module.tone)}>
+                {toneText(module.tone)} / {module.statusLabel}
+              </Tag>
             </div>
             <Paragraph className="report-module-summary">{module.summary}</Paragraph>
             {module.bullets.length > 0 && (
@@ -211,7 +232,9 @@ const ReportView: React.FC<ReportViewProps> = ({ data, onOpenDcfWorkbench }) => 
             <Card key={card.key} className="report-agent-card-v2">
               <div className="report-agent-card-head">
                 <Text strong>{card.label}</Text>
-                <Tag color={toneColor(card.tone)}>{card.confidenceText}</Tag>
+                <Tag color={toneColor(card.tone)}>
+                  {card.confidenceText} / {toneText(card.tone)}
+                </Tag>
               </div>
               <Paragraph className="report-agent-card-summary">{card.summary}</Paragraph>
             </Card>
@@ -228,10 +251,13 @@ const ReportView: React.FC<ReportViewProps> = ({ data, onOpenDcfWorkbench }) => 
         items={[
           {
             key: 'raw-report',
-            label: '查看原始数据与调试信息',
-            children: (
-              <pre className="report-raw-json">{JSON.stringify(data, null, 2)}</pre>
+            label: (
+              <Space size={8}>
+                <InfoCircleOutlined />
+                查看原始数据与调试信息
+              </Space>
             ),
+            children: <pre className="report-raw-json">{JSON.stringify(data, null, 2)}</pre>,
           },
         ]}
       />

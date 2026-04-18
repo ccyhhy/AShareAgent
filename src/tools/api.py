@@ -1322,10 +1322,40 @@ def _calculate_ps_ratio(market_cap, revenue):
         return mc / rev
     return None
 
+def _snapshot_symbol_candidates(symbol: str) -> list[str]:
+    raw = str(symbol or "")
+    stripped = raw.strip()
+    normalized = _normalize_a_share_symbol(stripped)
+    candidates: list[str] = []
+    for item in (normalized, stripped, raw):
+        if item and item not in candidates:
+            candidates.append(item)
+    return candidates
+
+
+def _resolve_snapshot_path(dataset: str, symbol: str) -> Optional[Path]:
+    root = _get_snapshot_root() / dataset
+    if not root.exists():
+        return None
+
+    for candidate in _snapshot_symbol_candidates(symbol):
+        path = root / f"{candidate}.json"
+        if path.exists():
+            return path
+
+    normalized = _normalize_a_share_symbol(symbol)
+    if normalized:
+        for path in sorted(root.glob(f"{normalized}*.json")):
+            if path.exists():
+                return path
+
+    return None
+
+
 def _load_dataset_snapshot(dataset: str, symbol: str, *, allow_stale: bool = False) -> Optional[Any]:
     """从本地快照目录加载数据集快照。"""
-    snapshot_path = _get_snapshot_root() / dataset / f"{symbol}.json"
-    if not snapshot_path.exists():
+    snapshot_path = _resolve_snapshot_path(dataset, symbol)
+    if snapshot_path is None:
         return None
 
     try:
@@ -1356,11 +1386,12 @@ def _load_dataset_snapshot(dataset: str, symbol: str, *, allow_stale: bool = Fal
 
 def _save_dataset_snapshot(dataset: str, symbol: str, payload: Any, *, source: str) -> None:
     """保存数据集快照到本地目录。"""
-    snapshot_path = _get_snapshot_root() / dataset / f"{symbol}.json"
+    normalized = _normalize_a_share_symbol(symbol) or str(symbol).strip() or str(symbol)
+    snapshot_path = _get_snapshot_root() / dataset / f"{normalized}.json"
     snapshot_path.parent.mkdir(parents=True, exist_ok=True)
     snapshot_payload = {
         "dataset": dataset,
-        "symbol": symbol,
+        "symbol": normalized,
         "source": source,
         "fetched_at": datetime.now().isoformat(),
         "data": _strip_snapshot_metadata(payload),
@@ -1369,6 +1400,16 @@ def _save_dataset_snapshot(dataset: str, symbol: str, payload: Any, *, source: s
         json.dumps(snapshot_payload, ensure_ascii=False, default=str),
         encoding="utf-8",
     )
+
+    for candidate in _snapshot_symbol_candidates(symbol):
+        if candidate == normalized:
+            continue
+        legacy_path = snapshot_path.parent / f"{candidate}.json"
+        if legacy_path.exists():
+            try:
+                legacy_path.unlink()
+            except Exception:
+                pass
 
 def _attach_snapshot_metadata(payload: Any, *, data_source: str, cache_status: str, fetched_at: str, is_snapshot: bool, ttl_hours: int) -> Any:
     """附加统一的快照元数据。"""
@@ -1467,3 +1508,5 @@ def get_eastmoney_data(symbol: str, raw_response: bool = False) -> Optional[Dict
     except Exception as e:
         logger.error(f"Error fetching data from eastmoney: {e}")
         return None
+
+

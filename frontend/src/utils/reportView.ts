@@ -23,6 +23,12 @@ export interface ReportAgentCard {
   summary: string;
 }
 
+export interface ReportDecisionFact {
+  label: string;
+  value: string;
+  hint: string;
+}
+
 export interface ReportDashboard {
   ticker: string;
   actionLabel: string;
@@ -30,11 +36,15 @@ export interface ReportDashboard {
   confidenceText: string;
   heroReason: string;
   dataIntegrityLabel: string;
+  decisionFacts: ReportDecisionFact[];
+  keyEvidence: string[];
+  limitationPoints: string[];
   supportPoints: string[];
   concernPoints: string[];
   balanceSummary: string;
   riskSummary: string;
   reliabilitySummary: string;
+  dataSourceLines: string[];
   modules: ReportModule[];
   agentCards: ReportAgentCard[];
   dcfHeadline: string;
@@ -46,14 +56,17 @@ const AGENT_LABELS: Record<string, string> = {
   technicals: '相对估值',
   fundamentals: '基本面',
   sentiment: '情绪面',
-  valuation: 'DCF 估值',
+  valuation: 'DCF估值',
   macro_news_agent: '宏观新闻',
+  macro_news: '宏观新闻',
   researcher_bull: '多头研究员',
   researcher_bear: '空头研究员',
   debate_room: '多空辩论',
   risk_manager: '风险管理',
+  risk_management: '风险管理',
   macro_analyst: '宏观分析师',
   portfolio_manager: '组合经理',
+  portfolio_management: '组合经理',
   policy_impact: '政策影响',
   liquidity: '流动性评估',
 };
@@ -92,10 +105,25 @@ const toText = (value: unknown, fallback = ''): string => {
 
 const toTone = (value: unknown): 'bullish' | 'bearish' | 'neutral' => {
   const text = String(value || '').toLowerCase();
-  if (text.includes('buy') || text.includes('bull')) {
+  if (
+    text.includes('buy') ||
+    text.includes('bull') ||
+    text.includes('long') ||
+    text.includes('买') ||
+    text.includes('增持') ||
+    text.includes('偏多')
+  ) {
     return 'bullish';
   }
-  if (text.includes('sell') || text.includes('bear')) {
+  if (
+    text.includes('sell') ||
+    text.includes('bear') ||
+    text.includes('short') ||
+    text.includes('卖') ||
+    text.includes('减持') ||
+    text.includes('回避') ||
+    text.includes('偏空')
+  ) {
     return 'bearish';
   }
   return 'neutral';
@@ -129,6 +157,20 @@ const toConfidenceText = (value: unknown): string => {
   return String(value);
 };
 
+const toNonNegativeInt = (value: unknown): number => {
+  if (value == null) {
+    return 0;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number.parseFloat(value.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+  }
+  return 0;
+};
+
 const pickBulletList = (...values: unknown[]): string[] => {
   const collected: string[] = [];
 
@@ -155,7 +197,7 @@ const pickBulletList = (...values: unknown[]): string[] => {
       .forEach((item) => collected.push(item));
   });
 
-  return Array.from(new Set(collected)).slice(0, 4);
+  return Array.from(new Set(collected)).slice(0, 6);
 };
 
 const normalizeDataReliability = (marketData: Record<string, any>): string => {
@@ -164,33 +206,81 @@ const normalizeDataReliability = (marketData: Record<string, any>): string => {
     : [];
 
   if (missing.length === 0 && marketData.critical_data_complete) {
-    return '关键数据完整，本轮结论可以作为正式分析参考。';
+    return '关键数据完整，本轮结论可作为正式分析参考。';
   }
 
   if (missing.length > 0) {
-    return `关键数据缺失：${missing.join('、')}。因此本轮结论应偏保守解读，尤其不能把缺失数据误当成看多或看空信号。`;
+    return `关键数据缺失：${missing.join('、')}。本轮结论应偏保守解读，不应把缺失信息当成看多或看空依据。`;
   }
 
   return '当前分析存在数据缺口，请结合原始结果谨慎解读。';
 };
 
-const buildValuationModule = (valuation: Record<string, any>, technicals: Record<string, any>): ReportModule => {
+const DATASET_LABELS: Record<string, string> = {
+  financial_metrics: '财务指标',
+  financial_statements: '财务报表',
+  market_data: '市场行情',
+  price_reference: '价格口径',
+};
+
+const CACHE_STATUS_LABELS: Record<string, string> = {
+  remote_live: '实时拉取',
+  fresh_snapshot: '本地快照(新鲜)',
+  stale_snapshot: '本地快照(过期回退)',
+  offline_fallback: '离线回退',
+  offline_derived: '离线推导',
+  default_empty: '空数据',
+  unknown: '未标注',
+};
+
+const normalizeCacheStatusLabel = (value: unknown): string => {
+  const key = String(value || '').trim().toLowerCase();
+  return CACHE_STATUS_LABELS[key] || (key || '未标注');
+};
+
+const buildDataSourceLines = (marketData: Record<string, any>): string[] => {
+  const dataSources = marketData.data_sources;
+  if (!dataSources || typeof dataSources !== 'object' || Array.isArray(dataSources)) {
+    return [];
+  }
+
+  return Object.entries(dataSources as Record<string, any>)
+    .map(([key, rawValue]) => {
+      const row = rawValue && typeof rawValue === 'object' ? (rawValue as Record<string, any>) : {};
+      const label = DATASET_LABELS[key] || key;
+      const source = toText(row.source, '未标注');
+      const asOf = toText(row.as_of, '未标注');
+      const cacheStatus = normalizeCacheStatusLabel(row.cache_status);
+      return `${label}：${source}｜日期 ${asOf}｜${cacheStatus}`;
+    })
+    .filter(Boolean);
+};
+
+const buildValuationModule = (
+  valuation: Record<string, any>,
+  technicals: Record<string, any>,
+): ReportModule => {
   const assumptions = valuation.assumptions || {};
   const margin = typeof valuation.margin_of_safety === 'number' ? valuation.margin_of_safety : null;
+  const isDataInsufficient =
+    valuation.data_quality === '数据不足' ||
+    (!valuation.intrinsic_value && !valuation.market_cap);
 
-  if (valuation.data_quality === '数据不足') {
+  if (isDataInsufficient) {
     return {
       key: 'valuation',
       title: '估值面',
       tone: 'warning',
       statusLabel: '数据不足',
-      summary: '估值证据不足，本轮不能把 DCF 或相对估值作为主要买入依据。',
+      summary: '估值证据不足，本轮不应把 DCF 或相对估值作为主要买入依据。',
       bullets: pickBulletList(
         valuation.reasoning,
         technicals.reasoning,
-        `折现率 ${toConfidenceText(assumptions.discount_rate)}，第一阶段增长 ${toConfidenceText(
-          assumptions.stage1_growth_rate,
-        )}，永续增长 ${toConfidenceText(assumptions.terminal_growth_rate)}`,
+        assumptions.discount_rate != null
+          ? `折现率 ${toConfidenceText(assumptions.discount_rate)}，第一阶段增长 ${toConfidenceText(
+              assumptions.stage1_growth_rate,
+            )}，永续增长 ${toConfidenceText(assumptions.terminal_growth_rate)}`
+          : null,
       ),
     };
   }
@@ -201,8 +291,7 @@ const buildValuationModule = (valuation: Record<string, any>, technicals: Record
     tone: getMarginTone(margin),
     statusLabel: margin != null && margin > 0.15 ? '存在安全边际' : '估值大致合理',
     summary:
-      toText(valuation.reasoning) ||
-      'DCF 与相对估值共同构成估值判断，本轮估值结果可作为决策参考。',
+      toText(valuation.reasoning) || 'DCF 与相对估值共同构成估值判断，本轮估值结果可作为决策参考。',
     bullets: pickBulletList(
       `内在价值 ${formatCurrency(Number(valuation.intrinsic_value || 0))}`,
       `当前市值 ${formatCurrency(Number(valuation.market_cap || 0))}`,
@@ -223,10 +312,12 @@ const buildFundamentalModule = (fundamentals: Record<string, any>): ReportModule
     statusLabel: hasMissing ? '数据不足' : toActionLabel(fundamentals.signal).replace('建议', ''),
     summary: hasMissing
       ? '财务关键指标存在缺口，因此本轮基本面判断只能作为弱证据。'
-      : reasoning || '基本面主要用于判断盈利能力、增长质量与财务稳健性。',
+      : reasoning || '基本面用于判断盈利能力、增长质量与财务稳健性。',
     bullets: pickBulletList(
       fundamentals.reasoning,
-      fundamentals.memory_delta?.change_type ? `信号变化：${fundamentals.memory_delta.change_type}` : null,
+      fundamentals.memory_delta?.change_type
+        ? `信号变化：${fundamentals.memory_delta.change_type}`
+        : null,
     ),
   };
 };
@@ -246,12 +337,8 @@ const buildSentimentModule = (
     summary:
       toText(macroAnalyst.reasoning) ||
       toText(sentiment.reasoning) ||
-      '消息与情绪模块主要用于补充短期催化和市场预期变化。',
-    bullets: pickBulletList(
-      sentiment.reasoning,
-      macroNews.reasoning,
-      macroAnalyst.reasoning,
-    ),
+      '消息与情绪模块用于补充短期催化与市场预期变化。',
+    bullets: pickBulletList(sentiment.reasoning, macroNews.reasoning, macroAnalyst.reasoning),
   };
 };
 
@@ -269,22 +356,103 @@ const buildRiskModule = (riskManager: Record<string, any>): ReportModule => {
     title: '风险面',
     tone,
     statusLabel:
-      typeof riskScore === 'number'
-        ? `风险评分 ${riskScore.toFixed(2)}`
-        : '风险待确认',
+      typeof riskScore === 'number' ? `风险评分 ${riskScore.toFixed(2)}` : '风险待确认',
     summary:
-      toText(riskManager.reasoning) ||
-      '风险模块用于衡量波动、回撤和仓位约束是否支持当前结论。',
+      toText(riskManager.reasoning) || '风险模块用于衡量波动、回撤与仓位约束是否支持当前结论。',
     bullets: pickBulletList(
       riskManager.reasoning,
-      riskManager.max_position_size ? `风控上限金额 ${riskManager.max_position_size}` : null,
+      riskManager.max_position_size != null
+        ? `风控上限金额 ${riskManager.max_position_size}`
+        : null,
       riskManager.current_price ? `参考价格 ${riskManager.current_price}` : null,
+      riskManager.max_buy_quantity != null ? `可买上限 ${riskManager.max_buy_quantity} 股` : null,
     ),
   };
 };
 
-const buildAgentCards = (agentOutputs: Record<string, any>): ReportAgentCard[] => {
-  return Object.entries(agentOutputs)
+const buildDecisionFacts = (
+  decision: Record<string, any>,
+  marketData: Record<string, any>,
+  riskManager: Record<string, any>,
+  actionLabel: string,
+  confidenceText: string,
+): ReportDecisionFact[] => {
+  const quantity = toNonNegativeInt(decision.quantity);
+  const maxBuyQty = toNonNegativeInt(riskManager.max_buy_quantity);
+  const riskScore = typeof riskManager.risk_score === 'number' ? riskManager.risk_score.toFixed(2) : '--';
+  const dataState = marketData.critical_data_complete ? '完整' : '不完整';
+
+  return [
+    {
+      label: '执行动作',
+      value: actionLabel,
+      hint: quantity > 0 ? `建议数量 ${quantity} 股` : '本轮建议不新增仓位',
+    },
+    {
+      label: '结论置信度',
+      value: confidenceText,
+      hint: '综合多智能体输出后的最终置信度',
+    },
+    {
+      label: '风控约束',
+      value: `${maxBuyQty} 股`,
+      hint: `风险评分 ${riskScore}，需遵守仓位与整手约束`,
+    },
+    {
+      label: '数据状态',
+      value: dataState,
+      hint: marketData.critical_data_complete
+        ? '关键数据齐全，可作为正式分析参考'
+        : '关键数据缺口存在，结论应保守解读',
+    },
+  ];
+};
+
+const buildKeyEvidence = (
+  supportPoints: string[],
+  concernPoints: string[],
+  modules: ReportModule[],
+  balanceSummary: string,
+): string[] => {
+  const moduleBullets = modules.flatMap((module) => module.bullets || []);
+  return Array.from(
+    new Set([...supportPoints, ...moduleBullets, ...concernPoints, balanceSummary].filter(Boolean)),
+  ).slice(0, 6);
+};
+
+const buildLimitationPoints = (
+  marketData: Record<string, any>,
+  valuation: Record<string, any>,
+  fundamentals: Record<string, any>,
+  macroNews: Record<string, any>,
+): string[] => {
+  const limitations: string[] = [];
+  const missingCritical = Array.isArray(marketData.missing_critical_data)
+    ? marketData.missing_critical_data
+    : [];
+
+  if (missingCritical.length > 0) {
+    limitations.push(`关键数据缺失：${missingCritical.join('、')}。`);
+  }
+  if (valuation.data_quality === '数据不足') {
+    limitations.push('DCF 输入不足，本轮估值仅能作为弱证据。');
+  }
+  if (toText(fundamentals.reasoning).includes('N/A')) {
+    limitations.push('基本面关键指标存在 N/A，财务侧判断可靠性下降。');
+  }
+  if (toText(macroNews.reasoning).includes('未返回有效结果')) {
+    limitations.push('宏观新闻模块本轮未返回有效结果，情绪证据偏弱。');
+  }
+
+  if (limitations.length === 0) {
+    limitations.push('未发现明显结构性缺口，但仍需结合个人风险偏好与交易纪律。');
+  }
+
+  return limitations.slice(0, 5);
+};
+
+const buildAgentCards = (agentOutputs: Record<string, any>): ReportAgentCard[] =>
+  Object.entries(agentOutputs)
     .map(([key, value]) => ({
       key,
       label: AGENT_LABELS[key] || key,
@@ -293,7 +461,6 @@ const buildAgentCards = (agentOutputs: Record<string, any>): ReportAgentCard[] =
       summary: toText(value?.summary ?? value?.reasoning, '本模块已参与本轮结论生成。'),
     }))
     .sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
-};
 
 export const buildReportDashboard = (result: any): ReportDashboard => {
   const { analysisData, agentOutputs } = normalizeAnalysisPayload(result);
@@ -303,13 +470,20 @@ export const buildReportDashboard = (result: any): ReportDashboard => {
   const technicals = (agentOutputs.technicals || {}) as Record<string, any>;
   const fundamentals = (agentOutputs.fundamentals || {}) as Record<string, any>;
   const sentiment = (agentOutputs.sentiment || {}) as Record<string, any>;
-  const macroNews = (agentOutputs.macro_news_agent || {}) as Record<string, any>;
+  const macroNews = (agentOutputs.macro_news_agent || agentOutputs.macro_news || {}) as Record<string, any>;
   const macroAnalyst = (agentOutputs.macro_analyst || {}) as Record<string, any>;
-  const riskManager = (agentOutputs.risk_manager || {}) as Record<string, any>;
+  const riskManager = (agentOutputs.risk_manager || agentOutputs.risk_management || {}) as Record<string, any>;
   const bull = (agentOutputs.researcher_bull || {}) as Record<string, any>;
   const bear = (agentOutputs.researcher_bear || {}) as Record<string, any>;
   const debate = (agentOutputs.debate_room || {}) as Record<string, any>;
-  const portfolio = (agentOutputs.portfolio_manager || {}) as Record<string, any>;
+  const portfolio = (
+    agentOutputs.portfolio_manager ||
+    agentOutputs.portfolio_management ||
+    {}
+  ) as Record<string, any>;
+
+  const actionLabel = toActionLabel(decision.action || decision.decision || decision.signal);
+  const confidenceText = toConfidenceText(decision.confidence || portfolio.confidence);
 
   const dcfDefaults = buildDcfDefaultsFromAnalysis(result);
   const dcfAssumptionChips = [
@@ -326,54 +500,67 @@ export const buildReportDashboard = (result: any): ReportDashboard => {
     {
       label: '永续增长',
       value: `${dcfDefaults.assumptions.terminalGrowthRatePct.toFixed(2)}%`,
-      note: '稳定期长期增长假设，决定终值贡献。 ',
+      note: '稳定期长期增长假设，决定终值贡献。',
     },
   ];
 
+  const modules = [
+    buildValuationModule(valuation, technicals),
+    buildFundamentalModule(fundamentals),
+    buildSentimentModule(sentiment, macroNews, macroAnalyst),
+    buildRiskModule(riskManager),
+  ];
+
+  const supportPoints = pickBulletList(
+    bull.thesis_points,
+    bull.reasoning,
+    typeof valuation.margin_of_safety === 'number' && valuation.margin_of_safety > 0
+      ? `DCF 显示安全边际 ${formatPercent(valuation.margin_of_safety)}`
+      : null,
+  );
+
+  const concernPoints = pickBulletList(
+    bear.thesis_points,
+    bear.reasoning,
+    !marketData.critical_data_complete ? normalizeDataReliability(marketData) : null,
+    riskManager.reasoning,
+  );
+
+  const balanceSummary = toText(
+    portfolio.reasoning || debate.reasoning,
+    '系统综合多空观点后，当前更适合保持中性解读。',
+  );
+
+  const dataInsufficient = valuation.data_quality === '数据不足' || !marketData.critical_data_complete;
+  const dataSourceLines = buildDataSourceLines(marketData);
+
   return {
     ticker: toText(result?.ticker || decision?.ticker, '--'),
-    actionLabel: toActionLabel(decision.action || decision.decision || decision.signal),
+    actionLabel,
     actionTone: toTone(decision.action || decision.decision || decision.signal),
-    confidenceText: toConfidenceText(decision.confidence || portfolio.confidence),
-    heroReason:
-      toText(
-        decision.reasoning || decision.summary || portfolio.reasoning,
-        '系统已完成本轮分析，请结合各模块证据理解结论。',
-      ),
+    confidenceText,
+    heroReason: toText(
+      decision.reasoning || decision.summary || portfolio.reasoning,
+      '系统已完成本轮分析，请结合各模块证据理解结论。',
+    ),
     dataIntegrityLabel: marketData.critical_data_complete ? '关键数据完整' : '关键数据不完整',
-    supportPoints: pickBulletList(
-      bull.thesis_points,
-      bull.reasoning,
-      typeof valuation.margin_of_safety === 'number' && valuation.margin_of_safety > 0
-        ? `DCF 显示安全边际 ${formatPercent(valuation.margin_of_safety)}`
-        : null,
+    decisionFacts: buildDecisionFacts(decision, marketData, riskManager, actionLabel, confidenceText),
+    keyEvidence: buildKeyEvidence(supportPoints, concernPoints, modules, balanceSummary),
+    limitationPoints: buildLimitationPoints(marketData, valuation, fundamentals, macroNews),
+    supportPoints,
+    concernPoints,
+    balanceSummary,
+    riskSummary: toText(
+      decision.ashare_considerations || decision.risk_summary || riskManager.reasoning,
+      '暂未识别到额外风险提示。',
     ),
-    concernPoints: pickBulletList(
-      bear.thesis_points,
-      bear.reasoning,
-      !marketData.critical_data_complete ? normalizeDataReliability(marketData) : null,
-      riskManager.reasoning,
-    ),
-    balanceSummary:
-      toText(portfolio.reasoning || debate.reasoning, '系统综合多空观点后，当前更适合保持中性解读。'),
-    riskSummary:
-      toText(
-        decision.ashare_considerations || decision.risk_summary || riskManager.reasoning,
-        '暂未识别到额外风险提示。',
-      ),
     reliabilitySummary: normalizeDataReliability(marketData),
-    modules: [
-      buildValuationModule(valuation, technicals),
-      buildFundamentalModule(fundamentals),
-      buildSentimentModule(sentiment, macroNews, macroAnalyst),
-      buildRiskModule(riskManager),
-    ],
+    dataSourceLines,
+    modules,
     agentCards: buildAgentCards(agentOutputs),
-    dcfHeadline:
-      valuation.data_quality === '数据不足'
-        ? '本轮 DCF 不可作为主要依据，因为关键输入不足。'
-        : `本轮 DCF 估值结论：${toText(valuation.margin_of_safety_assessment, '估值中性')}。`,
+    dcfHeadline: dataInsufficient
+      ? '本轮 DCF 不可作为主要依据，因为关键输入不足。'
+      : `本轮 DCF 估值结论：${toText(valuation.margin_of_safety_assessment, '估值中性')}。`,
     dcfAssumptionChips,
   };
 };
-

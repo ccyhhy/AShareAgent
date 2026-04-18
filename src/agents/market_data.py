@@ -108,6 +108,29 @@ def _extract_market_cap(financial_metrics: list[dict]) -> float | None:
     return value if isinstance(value, (int, float)) and value > 0 else None
 
 
+def _extract_dataset_meta(
+    payload: dict | list | None,
+    *,
+    fallback_source: str | None = None,
+    fallback_as_of: str | None = None,
+    fallback_cache_status: str | None = None,
+) -> dict:
+    base: dict = {}
+    if isinstance(payload, list):
+        first = payload[0] if payload and isinstance(payload[0], dict) else {}
+        if isinstance(first, dict):
+            base = first
+    elif isinstance(payload, dict):
+        base = payload
+
+    return {
+        "source": base.get("data_source") or fallback_source or "unknown",
+        "as_of": base.get("data_as_of") or fallback_as_of or None,
+        "cache_status": base.get("cache_status") or fallback_cache_status or "unknown",
+        "is_snapshot": bool(base.get("is_snapshot")) if "is_snapshot" in base else None,
+    }
+
+
 
 
 @agent_endpoint("market_data", "市场数据收集与预处理")
@@ -300,6 +323,26 @@ def market_data_agent(state: AgentState):
     )
 
     critical_data_complete = metrics_ok and statements_ok and market_ok
+    data_sources = {
+        "financial_metrics": _extract_dataset_meta(financial_metrics),
+        "financial_statements": _extract_dataset_meta(financial_line_items),
+        "market_data": _extract_dataset_meta(
+            market_data,
+            fallback_source=market_data.get("price_source") if isinstance(market_data, dict) else None,
+        ),
+        "price_reference": {
+            "source": (market_data.get("price_source") if isinstance(market_data, dict) else None) or "close_price",
+            "as_of": price_as_of,
+            "cache_status": (
+                market_data.get("cache_status") if isinstance(market_data, dict) else None
+            ) or "unknown",
+            "is_snapshot": (
+                bool(market_data.get("is_snapshot"))
+                if isinstance(market_data, dict) and "is_snapshot" in market_data
+                else None
+            ),
+        },
+    }
 
     market_data_summary = {
         "agent_type": "data_layer",
@@ -324,6 +367,7 @@ def market_data_agent(state: AgentState):
         "price_source": market_data.get("price_source"),
         "price_as_of": market_data.get("price_as_of"),
         "price_is_realtime": market_data.get("price_is_realtime", False),
+        "data_sources": data_sources,
         "data_quality": {
             "missing_components": missing_components,
             "missing_components_readable": missing_components_cn,

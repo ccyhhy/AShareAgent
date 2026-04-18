@@ -22,6 +22,15 @@ interface AgentInsight {
   structured_entries?: Array<{ key: string; value: string }>;
 }
 
+interface DataSourceRow {
+  key: string;
+  label: string;
+  source: string;
+  asOf: string;
+  cacheStatus: string;
+  tone: 'good' | 'warn' | 'bad' | 'neutral';
+}
+
 type AgentTypeMeta = {
   label: string;
   tone: string;
@@ -236,6 +245,96 @@ const extractAgentInsights = (result: any): AgentInsight[] => {
   return [];
 };
 
+const DATASET_LABELS: Record<string, string> = {
+  financial_metrics: '财务指标',
+  financial_statements: '财务报表',
+  market_data: '市场行情',
+  price_reference: '价格口径',
+};
+
+const CACHE_STATUS_META: Record<string, { label: string; tone: DataSourceRow['tone'] }> = {
+  remote_live: { label: '实时拉取', tone: 'good' },
+  fresh_snapshot: { label: '本地快照(新鲜)', tone: 'good' },
+  stale_snapshot: { label: '本地快照(过期回退)', tone: 'warn' },
+  offline_fallback: { label: '离线回退', tone: 'warn' },
+  offline_derived: { label: '离线推导', tone: 'warn' },
+  default_empty: { label: '空数据', tone: 'bad' },
+  unknown: { label: '未标注', tone: 'neutral' },
+};
+
+const normalizeSourceText = (value: unknown): string => {
+  const text = String(value || '').trim();
+  return text || '未标注';
+};
+
+const normalizeAsOf = (value: unknown): string => {
+  const text = String(value || '').trim();
+  return text || '未标注';
+};
+
+const normalizeCacheStatus = (value: unknown): { label: string; tone: DataSourceRow['tone'] } => {
+  const key = String(value || '').trim().toLowerCase();
+  return CACHE_STATUS_META[key] || { label: key || '未标注', tone: 'neutral' };
+};
+
+const extractDataSourceRows = (agentOutputs: Record<string, any>): DataSourceRow[] => {
+  const rows: DataSourceRow[] = [];
+  const marketData =
+    agentOutputs.market_data && typeof agentOutputs.market_data === 'object'
+      ? (agentOutputs.market_data as Record<string, any>)
+      : {};
+
+  const sourceMap =
+    marketData.data_sources &&
+    typeof marketData.data_sources === 'object' &&
+    !Array.isArray(marketData.data_sources)
+      ? (marketData.data_sources as Record<string, any>)
+      : null;
+
+  if (sourceMap) {
+    Object.entries(sourceMap).forEach(([datasetKey, rawValue]) => {
+      const meta = rawValue && typeof rawValue === 'object' ? (rawValue as Record<string, any>) : {};
+      const cacheMeta = normalizeCacheStatus(meta.cache_status);
+      rows.push({
+        key: `market_data:${datasetKey}`,
+        label: DATASET_LABELS[datasetKey] || datasetKey,
+        source: normalizeSourceText(meta.source),
+        asOf: normalizeAsOf(meta.as_of),
+        cacheStatus: cacheMeta.label,
+        tone: cacheMeta.tone,
+      });
+    });
+  }
+
+  Object.entries(agentOutputs).forEach(([agentKey, payload]) => {
+    if (!payload || typeof payload !== 'object') {
+      return;
+    }
+    if (!('data_source' in (payload as Record<string, any>) || 'cache_status' in (payload as Record<string, any>))) {
+      return;
+    }
+
+    const p = payload as Record<string, any>;
+    const cacheMeta = normalizeCacheStatus(p.cache_status);
+    rows.push({
+      key: `agent:${agentKey}`,
+      label: formatAgentName(agentKey),
+      source: normalizeSourceText(p.data_source),
+      asOf: normalizeAsOf(p.data_as_of),
+      cacheStatus: cacheMeta.label,
+      tone: cacheMeta.tone,
+    });
+  });
+
+  const deduped = new Map<string, DataSourceRow>();
+  rows.forEach((row) => {
+    if (!deduped.has(row.key)) {
+      deduped.set(row.key, row);
+    }
+  });
+  return Array.from(deduped.values());
+};
+
 const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete, onOpenDcfWorkbench }) => {
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
@@ -302,6 +401,10 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete, onOp
 
   const normalizedPayload = useMemo(() => normalizeAnalysisPayload(result), [result]);
   const insights = useMemo(() => extractAgentInsights(result), [result]);
+  const dataSourceRows = useMemo(
+    () => extractDataSourceRows(normalizedPayload.agentOutputs || {}),
+    [normalizedPayload],
+  );
   const analysisData = normalizedPayload.analysisData || result || {};
   const decision =
     analysisData?.action ||
@@ -457,6 +560,28 @@ const AnalysisStatus: React.FC<AnalysisStatusProps> = ({ runId, onComplete, onOp
               <div className="analysis-summary-card">
                 <h3>风险提示</h3>
                 <p>{riskNote}</p>
+              </div>
+            </div>
+          )}
+
+          {dataSourceRows.length > 0 && (
+            <div className="analysis-data-source-panel">
+              <div className="analysis-section-head">
+                <h3>数据来源与时效</h3>
+              </div>
+              <div className="analysis-data-source-grid">
+                {dataSourceRows.map((item) => (
+                  <div className="analysis-data-source-item" key={item.key}>
+                    <div className="analysis-data-source-head">
+                      <strong>{item.label}</strong>
+                      <span className={`analysis-data-source-status analysis-data-source-status-${item.tone}`}>
+                        {item.cacheStatus}
+                      </span>
+                    </div>
+                    <p>来源：{item.source}</p>
+                    <p>数据日期：{item.asOf}</p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
